@@ -1,0 +1,230 @@
+import React, { useState } from 'react';
+import { IndianRupee, Wallet, Landmark, TrendingUp, Calendar, AlertTriangle, ArrowUpRight, ClipboardList, Edit2, Check, X } from 'lucide-react';
+
+export default function Dashboard({ activeDay, accounts, transactions, onNavigateToAddTx, onAdjustCash }) {
+  const [isEditingCash, setIsEditingCash] = useState(false);
+  const [editCashVal, setEditCashVal] = useState('');
+  const [savingCash, setSavingCash] = useState(false);
+
+  // Calculations
+  const totalBankBalance = accounts.reduce((sum, acc) => sum + (acc.currentBalance || 0), 0);
+  const cashInHand = activeDay ? activeDay.closingCash : 0;
+  const todayProfit = activeDay ? activeDay.totalProfit : 0;
+  const openingCash = activeDay ? activeDay.openingCash : 0;
+
+  const formatINR = (num) => '₹' + Number(num || 0).toLocaleString('en-IN');
+
+  // Distribution calculation
+  const totalAssets = cashInHand + totalBankBalance;
+  const cashPercentage = totalAssets > 0 ? (cashInHand / totalAssets) * 100 : 0;
+  const bankPercentage = totalAssets > 0 ? (totalBankBalance / totalAssets) * 100 : 0;
+
+  return (
+    <div className="flex flex-col gap-5 px-4 pt-4 select-none">
+      {/* Day Status Banner */}
+      {!activeDay ? (
+        <div className="bg-red-500/10 border border-red-500/20 rounded-2xl p-4 flex flex-col gap-2">
+          <div className="flex items-center gap-2 text-red-400">
+            <AlertTriangle className="w-5 h-5 shrink-0" />
+            <h3 className="font-bold text-sm">Ledger is Currently Closed</h3>
+          </div>
+          <p className="text-xs text-slate-300">
+            You must open the day in Settings/Backup tab to enable recording transactions and tracking cash balances.
+          </p>
+        </div>
+      ) : (
+        <div className="bg-slate-900/40 border border-slate-800 rounded-2xl p-3 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Calendar className="w-4 h-4 text-amber-500" />
+            <span className="text-xs font-semibold text-slate-300">Active Session: {activeDay.date}</span>
+          </div>
+          <span className="text-[10px] bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded-full font-bold">
+            OPENED
+          </span>
+        </div>
+      )}
+
+      {/* KPI Cards */}
+      <div className="flex flex-col gap-3">
+        {/* Cash In Hand Card */}
+        <div className="bg-gradient-to-br from-slate-900 to-slate-900/90 border border-slate-800/80 rounded-2xl p-4 flex items-center justify-between shadow-lg relative overflow-hidden">
+          <div className="absolute top-0 right-0 w-24 h-24 bg-amber-500/5 rounded-full blur-2xl -mr-6 -mt-6"></div>
+          <div className="flex flex-col gap-1">
+            <span className="text-xs font-medium text-slate-400 flex items-center gap-1">
+              <Wallet className="w-3.5 h-3.5 text-amber-400" /> Cash In Hand
+              {activeDay && !isEditingCash && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditCashVal(String(cashInHand));
+                    setIsEditingCash(true);
+                  }}
+                  className="text-slate-500 hover:text-amber-400 p-1"
+                >
+                  <Edit2 className="w-3 h-3" />
+                </button>
+              )}
+            </span>
+            {isEditingCash ? (
+              <div className="flex items-center gap-1.5 mt-1">
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  value={editCashVal}
+                  onChange={(e) => setEditCashVal(e.target.value.replace(/[^0-9]/g, ''))}
+                  className="w-28 h-8 px-2 text-sm font-bold bg-slate-950 border border-slate-750 text-slate-100 rounded focus:outline-none focus:border-amber-400"
+                />
+                <button
+                  type="button"
+                  onClick={async () => {
+                    setSavingCash(true);
+                    await onAdjustCash(Number(editCashVal) || 0);
+                    setIsEditingCash(false);
+                    setSavingCash(false);
+                  }}
+                  disabled={savingCash}
+                  className="p-1 bg-amber-500 rounded text-slate-950 hover:bg-amber-400"
+                >
+                  <Check className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsEditingCash(false)}
+                  className="p-1 bg-slate-800 rounded text-slate-400 hover:text-slate-200"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            ) : (
+              <span className="text-3xl font-extrabold tracking-tight text-amber-400">
+                {formatINR(cashInHand)}
+              </span>
+            )}
+            {activeDay && (
+              <span className="text-[10px] text-slate-500">
+                Opening Cash: {formatINR(openingCash)}
+              </span>
+            )}
+          </div>
+          <div className="p-3 bg-amber-500/10 rounded-xl border border-amber-500/20">
+            <IndianRupee className="w-6 h-6 text-amber-400" />
+          </div>
+        </div>
+
+        {/* Total Bank Balances Card */}
+        <div className="bg-gradient-to-br from-slate-900 to-slate-900/90 border border-slate-800/80 rounded-2xl p-4 flex items-center justify-between shadow-lg relative overflow-hidden">
+          <div className="absolute top-0 right-0 w-24 h-24 bg-emerald-500/5 rounded-full blur-2xl -mr-6 -mt-6"></div>
+          <div className="flex flex-col gap-1">
+            <span className="text-xs font-medium text-slate-400 flex items-center gap-1">
+              <Landmark className="w-3.5 h-3.5 text-emerald-400" /> Total Bank Balances
+            </span>
+            <span className="text-3xl font-extrabold tracking-tight text-emerald-400">
+              {formatINR(totalBankBalance)}
+            </span>
+            <span className="text-[10px] text-slate-500">
+              Active Accounts: {accounts.length}
+            </span>
+          </div>
+          <div className="p-3 bg-emerald-500/10 rounded-xl border border-emerald-500/20">
+            <Landmark className="w-6 h-6 text-emerald-400" />
+          </div>
+        </div>
+
+        {/* Today's Profit Card */}
+        <div className="bg-gradient-to-br from-slate-900 to-slate-900/90 border border-slate-800/80 rounded-2xl p-4 flex items-center justify-between shadow-lg relative overflow-hidden">
+          <div className="absolute top-0 right-0 w-24 h-24 bg-cyan-500/5 rounded-full blur-2xl -mr-6 -mt-6"></div>
+          <div className="flex flex-col gap-1">
+            <span className="text-xs font-medium text-slate-400 flex items-center gap-1">
+              <TrendingUp className="w-3.5 h-3.5 text-cyan-400" /> Today's Net Profit
+            </span>
+            <span className="text-3xl font-extrabold tracking-tight text-cyan-400">
+              {formatINR(todayProfit)}
+            </span>
+            <span className="text-[10px] text-slate-500">
+              1% commission model
+            </span>
+          </div>
+          <div className="p-3 bg-cyan-500/10 rounded-xl border border-cyan-500/20">
+            <TrendingUp className="w-6 h-6 text-cyan-400" />
+          </div>
+        </div>
+      </div>
+
+      {/* Clean Assets Visualisation */}
+      <div className="bg-slate-900/50 border border-slate-800/60 rounded-2xl p-4 flex flex-col gap-3">
+        <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">Cash vs Bank Balance</h3>
+        <div className="w-full h-3 bg-slate-800 rounded-full flex overflow-hidden">
+          <div
+            style={{ width: `${cashPercentage}%` }}
+            className="h-full bg-amber-400 rounded-l-full transition-all duration-500"
+          />
+          <div
+            style={{ width: `${bankPercentage}%` }}
+            className="h-full bg-emerald-400 rounded-r-full transition-all duration-500"
+          />
+        </div>
+        <div className="flex justify-between items-center text-xs">
+          <div className="flex items-center gap-1.5 text-amber-400">
+            <div className="w-2 h-2 rounded-full bg-amber-400" />
+            <span>Cash ({Math.round(cashPercentage)}%)</span>
+          </div>
+          <div className="flex items-center gap-1.5 text-emerald-400">
+            <div className="w-2 h-2 rounded-full bg-emerald-400" />
+            <span>Bank ({Math.round(bankPercentage)}%)</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Action Button & Recent Transactions */}
+      <div className="flex flex-col gap-3 mb-2">
+        <div className="flex justify-between items-center">
+          <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
+            <ClipboardList className="w-4 h-4 text-slate-400" /> Recent Transactions
+          </h3>
+          {activeDay && (
+            <button
+              onClick={onNavigateToAddTx}
+              className="text-xs font-semibold text-amber-400 flex items-center gap-1"
+            >
+              Add New <ArrowUpRight className="w-3.5 h-3.5" />
+            </button>
+          )}
+        </div>
+
+        {transactions.length === 0 ? (
+          <div className="bg-slate-900/30 border border-slate-800/40 rounded-2xl p-6 text-center text-slate-500 text-xs flex flex-col gap-1.5">
+            <p>No transactions registered for the day.</p>
+            {activeDay && (
+              <p className="text-amber-400/80 font-medium">Tap "Add New" to track your first withdraw transfer.</p>
+            )}
+          </div>
+        ) : (
+          <div className="flex flex-col gap-2 max-h-56 overflow-y-auto no-scrollbar">
+            {transactions.slice(0, 5).map((tx) => {
+              const bankName = tx.bankAccountId?.bankName || 'Deleted Bank';
+              return (
+                <div key={tx._id} className="bg-slate-900/60 border border-slate-800/80 rounded-xl p-3 flex justify-between items-center">
+                  <div className="flex flex-col gap-0.5">
+                    <span className="text-xs font-bold text-slate-200">{bankName}</span>
+                    <span className="text-[10px] text-slate-500">
+                      {new Date(tx.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    </span>
+                  </div>
+                  <div className="text-right flex flex-col gap-0.5">
+                    <span className={`text-xs font-bold ${tx.customerAmount >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                      {tx.customerAmount >= 0 ? '+' : ''}{formatINR(tx.customerAmount)}
+                    </span>
+                    <span className="text-[10px] text-slate-400">
+                      {tx.type === 'Debit' ? 'Cash In' : 'Cash Out'}: {formatINR(Math.abs(tx.cashOut))} | Profit: {formatINR(tx.profit)} ({tx.commissionMode || 'Deducted'})
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}

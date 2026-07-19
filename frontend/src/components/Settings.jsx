@@ -1,0 +1,810 @@
+import React, { useState, useEffect } from 'react';
+import { Settings as SettingsIcon, Play, Square, Download, Upload, ShieldAlert, RefreshCw, AlertCircle, Sparkles, RefreshCcw } from 'lucide-react';
+
+export default function Settings({ 
+  activeDay, 
+  backendUrl, 
+  isOfflineMode, 
+  dayHistory = [], 
+  transactions = [], 
+  onOpenDay, 
+  onCloseDay, 
+  onReopenDay, 
+  onReloadData, 
+  onResetPin 
+}) {
+  const [openingCash, setOpeningCash] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [actionError, setActionError] = useState('');
+  const [actionSuccess, setActionSuccess] = useState('');
+  const [importing, setImporting] = useState(false);
+
+  const [notificationPermission, setNotificationPermission] = useState(
+    typeof window !== 'undefined' && 'Notification' in window ? Notification.permission : 'default'
+  );
+
+  const requestNotificationPermission = async () => {
+    if (typeof window !== 'undefined' && 'Notification' in window) {
+      const permission = await Notification.requestPermission();
+      setNotificationPermission(permission);
+      if (permission === 'granted') {
+        try {
+          new Notification('Kiosk Ledger Activated', {
+            body: 'System notifications enabled! You will now receive push updates.'
+          });
+        } catch (e) {
+          console.warn('Failed to dispatch verification notification:', e);
+        }
+      }
+    }
+  };
+
+  const todayStr = new Date().toISOString().split('T')[0];
+  const todayClosedLedger = (dayHistory || []).find(d => d.date === todayStr && d.status === 'Closed');
+
+  const handleReopen = async () => {
+    if (!window.confirm("Wanna reopen the daily ledger for today? You can continue logging withdrawals/deposits.")) return;
+    setActionError('');
+    setActionSuccess('');
+    setIsSubmitting(true);
+    const res = await onReopenDay(todayStr);
+    if (res.success) {
+      setActionSuccess('Daily ledger reopened successfully!');
+      onReloadData();
+    } else {
+      setActionError(res.error || 'Failed to reopen ledger.');
+    }
+    setIsSubmitting(false);
+  };
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
+  const [emailLoading, setEmailLoading] = useState(false);
+  const [lastClosingCash, setLastClosingCash] = useState(0);
+
+  useEffect(() => {
+    const fetchLastClosingCash = async () => {
+      if (isOfflineMode) {
+        const history = JSON.parse(localStorage.getItem('kiosk_day_history') || '[]');
+        if (history.length > 0) {
+          const closed = history.filter(d => d.status === 'Closed');
+          if (closed.length > 0) {
+            setLastClosingCash(closed[0].closingCash || 0);
+          }
+        }
+        return;
+      }
+      try {
+        const res = await fetch(`${backendUrl}/api/day/history`);
+        const data = await res.json();
+        if (data.success && data.data && data.data.length > 0) {
+          const closed = data.data.filter(d => d.status === 'Closed');
+          if (closed.length > 0) {
+            setLastClosingCash(closed[0].closingCash || 0);
+          }
+        }
+      } catch (err) {
+        console.warn('Failed to fetch day history for carry-forward.', err);
+      }
+    };
+    fetchLastClosingCash();
+  }, [backendUrl, isOfflineMode, activeDay]);
+
+  const formatINR = (val) => '₹' + Number(val || 0).toLocaleString('en-IN');
+
+  const handleOpenDay = async (e) => {
+    e.preventDefault();
+    setActionError('');
+    setActionSuccess('');
+
+    if (!openingCash || Number(openingCash) < 0) {
+      setActionError('Please enter a valid opening physical cash amount.');
+      return;
+    }
+
+    setIsSubmitting(true);
+    const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+    const res = await onOpenDay(today, Number(openingCash));
+    if (res.success) {
+      setActionSuccess(`Ledger session opened for ${today}!`);
+      setOpeningCash('');
+    } else {
+      setActionError(res.error || 'Failed to open day summary.');
+    }
+    setIsSubmitting(false);
+  };
+
+  const handleCloseDay = async () => {
+    if (!window.confirm('Are you sure you want to CLOSE the ledger for today? You cannot record more transactions for today afterwards.')) return;
+    
+    setActionError('');
+    setActionSuccess('');
+    setIsSubmitting(true);
+    
+    const res = await onCloseDay();
+    if (res.success) {
+      setActionSuccess('Business day ledger closed successfully!');
+    } else {
+      setActionError(res.error || 'Failed to close day summary.');
+    }
+    setIsSubmitting(false);
+  };
+
+  const downloadFile = async (endpoint, defaultFilename) => {
+    setActionError('');
+    setActionSuccess('');
+
+    let queryParams = '';
+    if (startDate && endDate) {
+      queryParams = `?startDate=${startDate}&endDate=${endDate}`;
+    }
+
+    if (isOfflineMode) {
+      try {
+        if (endpoint === 'export-csv') {
+          let txs = JSON.parse(localStorage.getItem('kiosk_transactions') || '[]');
+          
+          if (startDate) {
+            txs = txs.filter(t => t.timestamp.split('T')[0] >= startDate);
+          }
+          if (endDate) {
+            txs = txs.filter(t => t.timestamp.split('T')[0] <= endDate);
+          }
+
+          const localAccs = JSON.parse(localStorage.getItem('kiosk_accounts') || '[]');
+          const dayHistoryLocal = JSON.parse(localStorage.getItem('kiosk_day_history') || '[]');
+          const activeLocal = JSON.parse(localStorage.getItem('kiosk_active_day') || 'null');
+          
+          const daySummariesList = [...dayHistoryLocal];
+          if (activeLocal) daySummariesList.push(activeLocal);
+
+          // Group by date
+          const groups = {};
+          txs.forEach(tx => {
+            const dateStr = tx.timestamp.split('T')[0];
+            if (!groups[dateStr]) groups[dateStr] = [];
+            groups[dateStr].push(tx);
+          });
+
+          const sortedDates = Object.keys(groups).sort();
+
+          let csv = 'Timestamp,Bank Account,Type,Customer Amount,Cash Out,Net Profit,Commission Mode,Customer Name,Bank Running Balance,Drawer Cash Balance\n';
+
+          for (const dateStr of sortedDates) {
+            const dayTxs = groups[dateStr];
+            const daySummary = daySummariesList.find(d => d.date === dateStr) || {
+              date: dateStr,
+              openingCash: 0,
+              closingCash: 0,
+              totalProfit: 0,
+              status: 'Closed',
+              bankBalances: {}
+            };
+
+            const dayClosingCash = Number(daySummary.closingCash || 0);
+            const dayOpeningCash = Number(daySummary.openingCash || 0);
+            const bankClosingMap = daySummary.bankBalances || {};
+
+            // Sort newest first to trace bank balance backwards
+            const txsDesc = [...dayTxs].sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp));
+
+            const runningBankMap = {};
+            localAccs.forEach(acc => {
+              if (daySummary.status === 'Open') {
+                runningBankMap[acc._id] = Number(acc.currentBalance || 0);
+              } else {
+                runningBankMap[acc._id] = bankClosingMap[acc.bankName] !== undefined
+                  ? Number(bankClosingMap[acc.bankName])
+                  : Number(acc.currentBalance || 0);
+              }
+            });
+
+            const mappedDesc = txsDesc.map(tx => {
+              const bankId = tx.bankAccountId?._id || tx.bankAccountId;
+              const currentVal = runningBankMap[bankId] !== undefined ? runningBankMap[bankId] : 0;
+              tx.runningBankBalAfter = currentVal;
+              runningBankMap[bankId] = currentVal - Number(tx.customerAmount || 0);
+              return tx;
+            });
+
+            // Sort oldest first to compute cash running balance forwards
+            const txsAsc = [...mappedDesc].sort((a,b) => new Date(a.timestamp) - new Date(b.timestamp));
+            let runningCash = dayOpeningCash;
+
+            const finalTxs = txsAsc.map(tx => {
+              runningCash = runningCash - Number(tx.cashOut || 0);
+              tx.runningCashAfter = runningCash;
+              return tx;
+            });
+
+            finalTxs.forEach(tx => {
+              const bankName = tx.bankAccountId?.bankName || 'Local Bank';
+              const timeStr = new Date(tx.timestamp).toLocaleString();
+              const comm = tx.commissionMode || 'Deducted';
+              const cust = tx.customerName || '';
+              csv += `"${timeStr}","${bankName.replace(/"/g, '""')}","${tx.type}",${tx.customerAmount},${tx.cashOut},${tx.profit},"${comm}","${cust.replace(/"/g, '""')}",${tx.runningBankBalAfter},${tx.runningCashAfter}\n`;
+            });
+
+            const bankSnapStr = Object.entries(bankClosingMap)
+              .map(([name, bal]) => `${name}: ₹${Number(bal).toLocaleString('en-IN')}`)
+              .join(' | ');
+
+            csv += `"=== EOD SUMMARY ===","Date: ${dateStr}","Total Tx: ${finalTxs.length}","Net Profit: ₹${Number(daySummary.totalProfit || 0).toLocaleString('en-IN')}","Drawer Cash: ₹${Number(dayClosingCash).toLocaleString('en-IN')}","Bank Snapshots: ${bankSnapStr || 'None'}","","","",""\n\n`;
+          }
+          
+          const blob = new Blob([csv], { type: 'text/csv' });
+          const url = window.URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = startDate && endDate ? `kiosk_transactions_${startDate}_to_${endDate}.csv` : 'kiosk_transactions_local.csv';
+          document.body.appendChild(a);
+          a.click();
+          window.URL.revokeObjectURL(url);
+          document.body.removeChild(a);
+          setActionSuccess('CSV downloaded successfully (Local)!');
+        } else {
+          // bin backup
+          const accounts = JSON.parse(localStorage.getItem('kiosk_accounts') || '[]');
+          let transactions = JSON.parse(localStorage.getItem('kiosk_transactions') || '[]');
+          const daySummaries = JSON.parse(localStorage.getItem('kiosk_day_history') || '[]');
+          const active = JSON.parse(localStorage.getItem('kiosk_active_day') || 'null');
+          if (active) daySummaries.push(active);
+
+          if (startDate) {
+            transactions = transactions.filter(t => t.timestamp.split('T')[0] >= startDate);
+          }
+          if (endDate) {
+            transactions = transactions.filter(t => t.timestamp.split('T')[0] <= endDate);
+          }
+
+          const backupData = {
+            accounts,
+            transactions,
+            daySummaries,
+            exportedAt: new Date().toISOString(),
+            isLocalBackup: true
+          };
+
+          const text = btoa(unescape(encodeURIComponent(JSON.stringify(backupData))));
+          const blob = new Blob([text], { type: 'application/octet-stream' });
+          const url = window.URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = startDate && endDate ? `kiosk_backup_${startDate}_to_${endDate}.bin` : 'kiosk_backup_local.bin';
+          document.body.appendChild(a);
+          a.click();
+          window.URL.revokeObjectURL(url);
+          document.body.removeChild(a);
+          setActionSuccess('Encrypted backup downloaded successfully (Local)!');
+        }
+      } catch (err) {
+        setActionError(`Local export failed: ${err.message}`);
+      }
+      return;
+    }
+
+    try {
+      const response = await fetch(`${backendUrl}/api/backup/${endpoint}${queryParams}`);
+      if (!response.ok) throw new Error('Failed to retrieve backup file.');
+      
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = startDate && endDate ? `kiosk_${endpoint}_${startDate}_to_${endDate}.${defaultFilename.split('.')[1]}` : defaultFilename;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+      setActionSuccess(`${defaultFilename} download initiated successfully!`);
+    } catch (err) {
+      setActionError(`Export failed: ${err.message}`);
+    }
+  };
+
+  const handleImportBackup = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setActionError('');
+    setActionSuccess('');
+    setImporting(true);
+
+    if (isOfflineMode) {
+      try {
+        const reader = new FileReader();
+        reader.onload = async (evt) => {
+          try {
+            const encryptedData = evt.target?.result;
+            if (typeof encryptedData !== 'string') throw new Error('Could not read file.');
+
+            // Decode from base64 representation
+            const decrypted = decodeURIComponent(escape(atob(encryptedData)));
+            const data = JSON.parse(decrypted);
+
+            if (!data.accounts || !data.transactions || !data.daySummaries) {
+              throw new Error('Invalid backup structure.');
+            }
+
+            localStorage.setItem('kiosk_accounts', JSON.stringify(data.accounts));
+            localStorage.setItem('kiosk_transactions', JSON.stringify(data.transactions));
+            
+            // Find active day and history list
+            const active = data.daySummaries.find(d => d.status === 'Open') || null;
+            const history = data.daySummaries.filter(d => d.status === 'Closed');
+            
+            localStorage.setItem('kiosk_active_day', JSON.stringify(active));
+            localStorage.setItem('kiosk_day_history', JSON.stringify(history));
+
+            setActionSuccess('Database restored successfully (Local)!');
+            onReloadData();
+          } catch (err) {
+            setActionError(`Import failed: ${err.message}`);
+          } finally {
+            setImporting(false);
+          }
+        };
+        reader.readAsText(file);
+      } catch (err) {
+        setActionError(`Import reading error: ${err.message}`);
+        setImporting(false);
+      }
+      return;
+    }
+
+    try {
+      const reader = new FileReader();
+      reader.onload = async (evt) => {
+        try {
+          const encryptedData = evt.target?.result;
+          if (typeof encryptedData !== 'string') throw new Error('Could not parse file content.');
+
+          const res = await fetch(`${backendUrl}/api/backup/import`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ encryptedData })
+          });
+          const data = await res.json();
+          if (data.success) {
+            setActionSuccess(data.message || 'Database restored successfully!');
+            onReloadData();
+          } else {
+            setActionError(data.error || 'Import failed. Check key settings.');
+          }
+        } catch (err) {
+          setActionError(`Import reading error: ${err.message}`);
+        } finally {
+          setImporting(false);
+        }
+      };
+      reader.readAsText(file);
+    } catch (err) {
+      setActionError(`File selector error: ${err.message}`);
+      setImporting(false);
+    }
+  };
+
+  const seedDemoData = async () => {
+    if (!window.confirm('This will seed demo accounts. Existing bank accounts will be preserved. Proceed?')) return;
+    
+    setActionError('');
+    setActionSuccess('');
+    setIsSubmitting(true);
+
+    if (isOfflineMode) {
+      try {
+        const accs = JSON.parse(localStorage.getItem('kiosk_accounts') || '[]');
+        const banks = ['SBI Main Account', 'ICICI Business', 'HDFC Ledger'];
+        
+        banks.forEach(bankName => {
+          const exists = accs.find(a => a.bankName.toLowerCase() === bankName.toLowerCase());
+          if (!exists) {
+            accs.push({
+              _id: 'local_' + Math.random().toString(36).substr(2, 9),
+              bankName,
+              currentBalance: Math.floor(Math.random() * 80000) + 20000,
+              createdAt: new Date().toISOString()
+            });
+          }
+        });
+        localStorage.setItem('kiosk_accounts', JSON.stringify(accs));
+        setActionSuccess('Demo accounts seeded locally! Open the day ledger to start.');
+        onReloadData();
+      } catch (err) {
+        setActionError('Failed to seed local accounts.');
+      } finally {
+        setIsSubmitting(false);
+      }
+      return;
+    }
+    
+    try {
+      const banks = ['SBI Main Account', 'ICICI Business', 'HDFC Ledger'];
+      for (const bankName of banks) {
+        await fetch(`${backendUrl}/api/accounts`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ bankName, currentBalance: Math.floor(Math.random() * 80000) + 20000 })
+        });
+      }
+      setActionSuccess('Demo accounts seeded! Add a transaction or open the day ledger.');
+      onReloadData();
+    } catch (err) {
+      setActionError('Failed to seed demo accounts.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleResetPin = () => {
+    if (window.confirm('Wipe passcode? You will be asked to configure a new 4-digit PIN instantly.')) {
+      onResetPin();
+    }
+  };
+
+  const handleEmailBackup = async () => {
+    setActionError('');
+    setActionSuccess('');
+    if (isOfflineMode) {
+      setActionError('Cannot trigger email backup in Local Mode. Check your backend connection.');
+      return;
+    }
+    
+    setEmailLoading(true);
+    try {
+      let res;
+      if (startDate && endDate) {
+        res = await fetch(`${backendUrl}/api/backup/email-range`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ startDate, endDate })
+        });
+      } else {
+        res = await fetch(`${backendUrl}/api/backup/email-today`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' }
+        });
+      }
+      
+      const data = await res.json();
+      if (data.success) {
+        setActionSuccess(data.message || 'Backup files successfully sent to your email inbox!');
+      } else {
+        setActionError(data.error || 'Failed to email backup files.');
+      }
+    } catch (err) {
+      setActionError('Network error. Check SMTP settings on backend.');
+    } finally {
+      setEmailLoading(false);
+    }
+  };
+
+  const handleWhatsAppShare = () => {
+    let rangeTxs = transactions || [];
+    if (startDate) {
+      rangeTxs = rangeTxs.filter(t => t.timestamp.split('T')[0] >= startDate);
+    }
+    if (endDate) {
+      rangeTxs = rangeTxs.filter(t => t.timestamp.split('T')[0] <= endDate);
+    }
+
+    const sorted = [...rangeTxs].sort((a,b) => new Date(a.timestamp) - new Date(b.timestamp));
+
+    let totalProfit = 0;
+    let withdrawCount = 0;
+    let withdrawAmt = 0;
+    let depositCount = 0;
+    let depositAmt = 0;
+    let txLines = '';
+
+    sorted.forEach((tx, index) => {
+      totalProfit += tx.profit;
+      const bankName = tx.bankAccountId?.bankName || 'Local Bank';
+      const isDebit = tx.type === 'Debit';
+      const amt = isDebit ? Math.abs(tx.customerAmount) : tx.cashOut;
+      
+      if (isDebit) {
+        depositCount++;
+        depositAmt += amt;
+      } else {
+        withdrawCount++;
+        withdrawAmt += amt;
+      }
+
+      const comm = tx.commissionMode || 'Deducted';
+      txLines += `${index + 1}. ${isDebit ? 'Dep' : 'Wd'} | ${bankName} | ₹${amt.toLocaleString('en-IN')} | Comm: ${comm} | Profit: ₹${tx.profit}\n`;
+    });
+
+    const closingCash = activeDay ? activeDay.closingCash : (dayHistory.length > 0 ? dayHistory[0].closingCash : 0);
+
+    const title = startDate && endDate 
+      ? `*Kiosk Ledger Report (${startDate} to ${endDate})*` 
+      : `*Kiosk Ledger Daily Report - ${activeDay?.date || todayStr}*`;
+
+    const text = `${title}
+
+📊 *Summary Statistics:*
+• Total Transactions: ${sorted.length}
+• Withdrawals: ${withdrawCount} (₹${withdrawAmt.toLocaleString('en-IN')})
+• Deposits: ${depositCount} (₹${depositAmt.toLocaleString('en-IN')})
+• Net Commission Profit: ₹${totalProfit.toLocaleString('en-IN')}
+💵 *Physical Cash in Drawer:* ₹${Number(closingCash).toLocaleString('en-IN')}
+
+📝 *Transaction Details:*
+${txLines || 'No transactions logged in this range.'}
+_Sent from Kiosk Ledger PWA_`;
+
+    const url = `https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`;
+    window.open(url, '_blank');
+  };
+
+  return (
+    <div className="flex flex-col gap-4 px-4 pt-4 pb-12 select-none">
+      <div className="flex flex-col gap-1">
+        <h2 className="text-lg font-bold text-slate-100 flex items-center gap-2">
+          <SettingsIcon className="w-5 h-5 text-amber-400" /> Settings & Backups
+        </h2>
+        <p className="text-xs text-slate-400">Manage daily ledger sessions, backups, and security settings</p>
+      </div>
+
+      {/* Daily Ledger Controls */}
+      <div className="bg-slate-900/40 border border-slate-800 rounded-2xl p-4 flex flex-col gap-3">
+        <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
+          <Square className="w-3.5 h-3.5 text-slate-400" /> Daily Ledger Controls
+        </h3>
+
+        {activeDay ? (
+          <div className="flex flex-col gap-3">
+            <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-850 flex flex-col gap-1 text-left">
+              <span className="text-[10px] text-slate-500">Date: {activeDay.date}</span>
+              <div className="flex justify-between items-center mt-1">
+                <span className="text-xs text-slate-300">Cash in Hand:</span>
+                <span className="text-sm font-bold text-amber-400">{formatINR(activeDay.closingCash)}</span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-xs text-slate-300">Total Profit Today:</span>
+                <span className="text-sm font-bold text-cyan-400">{formatINR(activeDay.totalProfit)}</span>
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={handleWhatsAppShare}
+                className="flex-1 h-11 bg-emerald-600 hover:bg-emerald-700 active:scale-95 transition-all text-slate-100 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5"
+              >
+                Share Summary
+              </button>
+              <button
+                onClick={handleCloseDay}
+                disabled={isSubmitting}
+                className="flex-1 h-11 bg-red-650 hover:bg-red-700 active:scale-95 transition-all text-slate-100 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5"
+              >
+                <Square className="w-4 h-4 fill-current text-slate-205" /> Close Ledger
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="flex flex-col gap-4">
+            {todayClosedLedger && (
+              <div className="flex flex-col gap-3 bg-slate-950/40 border border-slate-850 p-4 rounded-xl text-left">
+                <div className="flex justify-between items-center text-xs border-b border-slate-900 pb-1.5">
+                  <span className="text-slate-400 font-bold uppercase text-[9px] tracking-wider">Today's Session Summary</span>
+                  <span className="px-2 py-0.5 bg-red-500/10 border border-red-500/20 text-red-400 rounded-md font-bold text-[8px] uppercase">Closed</span>
+                </div>
+                <div className="flex justify-between items-center text-xs mt-1">
+                  <span className="text-slate-500">Cash Left in Drawer:</span>
+                  <span className="font-bold text-slate-100">{formatINR(todayClosedLedger.closingCash)}</span>
+                </div>
+                <div className="flex justify-between items-center text-xs">
+                  <span className="text-slate-500">Net Profit Earned:</span>
+                  <span className="font-bold text-emerald-400">{formatINR(todayClosedLedger.totalProfit)}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleReopen}
+                  disabled={isSubmitting}
+                  className="w-full h-10 mt-1.5 bg-amber-500 hover:bg-amber-600 active:scale-95 transition-all text-slate-950 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5"
+                >
+                  <RefreshCcw className="w-4 h-4 text-slate-950" /> Reopen Today's Ledger
+                </button>
+                <div className="border-t border-slate-900 my-1"></div>
+              </div>
+            )}
+
+            <form onSubmit={handleOpenDay} className="flex flex-col gap-3">
+              <div className="flex flex-col gap-1.5 text-left">
+                <label className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Open New Session / Ledger</label>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  placeholder="Opening Cash (₹)"
+                  value={openingCash}
+                  onChange={(e) => setOpeningCash(e.target.value.replace(/[^0-9]/g, ''))}
+                  className="w-full h-10 px-3 text-xs bg-slate-955 bg-slate-950 border border-slate-800 focus:border-amber-500 focus:outline-none rounded-xl text-slate-100 font-bold"
+                />
+                {lastClosingCash > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setOpeningCash(String(lastClosingCash))}
+                    className="text-[9px] text-amber-500 font-bold hover:text-amber-400 select-none text-left w-fit mt-1 flex items-center gap-1"
+                  >
+                    ⚡ Carry Forward Previous Cash: {formatINR(lastClosingCash)}
+                  </button>
+                )}
+              </div>
+              <button
+                type="submit"
+                disabled={isSubmitting}
+                className="w-full h-11 bg-emerald-600 hover:bg-emerald-700 active:scale-95 transition-all text-slate-100 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5"
+              >
+                <Play className="w-4 h-4 fill-current" /> Open Daily Ledger
+              </button>
+            </form>
+          </div>
+        )}
+      </div>
+
+      {/* Backup and CSV Export */}
+      <div className="bg-slate-900/40 border border-slate-800 rounded-2xl p-4 flex flex-col gap-3">
+        <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
+          <Download className="w-3.5 h-3.5 text-slate-400" /> Database Backup & Export
+        </h3>
+
+        {/* Date selection filters */}
+        <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-850 flex flex-col gap-2">
+          <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wide">Filter Statement Dates</span>
+          <div className="grid grid-cols-2 gap-2">
+            <div className="flex flex-col gap-1">
+              <span className="text-[8px] text-slate-500">Start Date</span>
+              <input
+                type="date"
+                value={startDate}
+                onChange={(e) => setStartDate(e.target.value)}
+                className="h-8 px-2 bg-slate-900 border border-slate-800 rounded-lg text-[10px] font-bold text-slate-100 focus:outline-none"
+              />
+            </div>
+            <div className="flex flex-col gap-1">
+              <span className="text-[8px] text-slate-500">End Date</span>
+              <input
+                type="date"
+                value={endDate}
+                onChange={(e) => setEndDate(e.target.value)}
+                className="h-8 px-2 bg-slate-900 border border-slate-800 rounded-lg text-[10px] font-bold text-slate-100 focus:outline-none"
+              />
+            </div>
+          </div>
+          {(startDate || endDate) && (
+            <button
+              type="button"
+              onClick={() => { setStartDate(''); setEndDate(''); }}
+              className="text-[9px] text-amber-500 font-bold text-right hover:text-amber-400 mt-1"
+            >
+              Clear Date Filter
+            </button>
+          )}
+        </div>
+
+        <div className="flex flex-col gap-2">
+          {/* CSV Download */}
+          <button
+            onClick={() => downloadFile('export-csv', 'kiosk_transactions.csv')}
+            className="w-full h-10 bg-slate-800 border border-slate-700 text-slate-200 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 hover:bg-slate-750 active:scale-95 transition-all"
+          >
+            <Download className="w-4 h-4 text-emerald-400" /> Download Transactions CSV
+          </button>
+
+          {/* Encrypted BIN Download */}
+          <button
+            onClick={() => downloadFile('export', 'kiosk_backup_encrypted.bin')}
+            className="w-full h-10 bg-slate-800 border border-slate-700 text-slate-200 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 hover:bg-slate-750 active:scale-95 transition-all"
+          >
+            <Download className="w-4 h-4 text-amber-400" /> Download Encrypted Bin Backup
+          </button>
+
+          {/* Email Trigger Button */}
+          <button
+            type="button"
+            onClick={handleEmailBackup}
+            disabled={emailLoading}
+            className="w-full h-10 bg-slate-800 border border-slate-700 text-slate-200 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 hover:bg-slate-750 active:scale-95 transition-all disabled:opacity-50"
+          >
+            {emailLoading ? (
+              <div className="w-4 h-4 border-2 border-slate-305 border-t-transparent rounded-full animate-spin"></div>
+            ) : (
+              'Email Backup Statement'
+            )}
+          </button>
+        </div>
+      </div>
+
+      {/* App Permissions & Notifications */}
+      <div className="bg-slate-900/40 border border-slate-800 rounded-2xl p-4 flex flex-col gap-3">
+        <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5 text-left">
+          <ShieldAlert className="w-3.5 h-3.5 text-slate-400" /> System Permissions
+        </h3>
+        
+        <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-850 flex items-center justify-between">
+          <div className="flex flex-col gap-0.5 text-left">
+            <span className="text-xs font-bold text-slate-100">Desktop Notifications</span>
+            <span className="text-[9px] text-slate-500">Alerts for completed transfers and ledger closures</span>
+          </div>
+          
+          {notificationPermission === 'granted' ? (
+            <span className="px-2 py-1 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 rounded-lg text-[9px] font-bold uppercase">Activated</span>
+          ) : (
+            <button
+              onClick={requestNotificationPermission}
+              className="px-3 h-8 bg-amber-500 hover:bg-amber-600 text-slate-950 rounded-lg text-[10px] font-bold transition-all"
+            >
+              Grant Permission
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Database Import */}
+      <div className="bg-slate-900/40 border border-slate-800 rounded-2xl p-4 flex flex-col gap-3">
+        <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
+          <Upload className="w-3.5 h-3.5 text-slate-400" /> Restore Database
+        </h3>
+        <p className="text-[10px] text-slate-500 leading-relaxed">
+          Restore data from a previously downloaded `.bin` backup file. This replaces all accounts and ledger history.
+        </p>
+        
+        <label className="w-full h-10 bg-slate-800 border border-dashed border-slate-750 rounded-xl flex items-center justify-center gap-2 cursor-pointer hover:bg-slate-750 transition-all">
+          <Upload className="w-4 h-4 text-slate-400" />
+          <span className="text-xs font-semibold text-slate-300">
+            {importing ? 'Restoring Ledger...' : 'Choose .bin Backup File'}
+          </span>
+          <input
+            type="file"
+            accept=".bin"
+            onChange={handleImportBackup}
+            disabled={importing}
+            className="hidden"
+          />
+        </label>
+      </div>
+
+      {/* Security Actions & Demos */}
+      <div className="bg-slate-900/40 border border-slate-800 rounded-2xl p-4 flex flex-col gap-3">
+        <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
+          <ShieldAlert className="w-3.5 h-3.5 text-slate-400" /> Access & System Actions
+        </h3>
+        
+        <div className="flex flex-col gap-2">
+          {/* Seed Demo Account */}
+          <button
+            onClick={seedDemoData}
+            disabled={isSubmitting}
+            className="w-full h-10 bg-slate-900 border border-slate-800 text-slate-300 hover:text-white rounded-xl text-xs font-medium flex items-center justify-center gap-2 hover:bg-slate-800 active:scale-95 transition-all"
+          >
+            <Sparkles className="w-4 h-4 text-amber-400" /> Seed Dummy Bank Accounts
+          </button>
+
+          {/* Reset PIN */}
+          <button
+            onClick={handleResetPin}
+            className="w-full h-10 bg-slate-900 border border-slate-800 text-red-400 hover:text-red-300 rounded-xl text-xs font-medium flex items-center justify-center gap-2 hover:bg-slate-800 active:scale-95 transition-all"
+          >
+            <RefreshCw className="w-4 h-4" /> Reset Security PIN Passcode
+          </button>
+        </div>
+      </div>
+
+      {/* Notifications */}
+      {actionError && (
+        <div className="text-xs font-semibold text-red-400 bg-red-500/5 border border-red-500/10 rounded-xl p-3 flex items-center gap-2">
+          <AlertCircle className="w-4 h-4 shrink-0" />
+          <span>{actionError}</span>
+        </div>
+      )}
+      {actionSuccess && (
+        <div className="text-xs font-semibold text-emerald-400 bg-emerald-500/5 border border-emerald-500/10 rounded-xl p-3 flex items-center gap-2">
+          <AlertCircle className="w-4 h-4 shrink-0" />
+          <span>{actionSuccess}</span>
+        </div>
+      )}
+    </div>
+  );
+}
