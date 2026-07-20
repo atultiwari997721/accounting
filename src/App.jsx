@@ -6,19 +6,6 @@ import TransactionForm from './components/TransactionForm';
 import PassbookAccounts from './components/PassbookAccounts';
 import Settings from './components/Settings';
 
-// Fallback logic for sandbox / Render deploy URLs
-const getBackendUrl = () => {
-  const stored = localStorage.getItem('kiosk_backend_url');
-  if (stored) return stored;
-  
-  if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
-    return 'http://localhost:5000';
-  }
-  
-  // Return relative or blank to support same-origin proxy, or default placeholder
-  return window.location.origin; 
-};
-
 export default function App() {
   const [isLocked, setIsLocked] = useState(true);
   const [activeTab, setActiveTab] = useState('home'); // 'home' | 'add' | 'passbook' | 'settings'
@@ -26,8 +13,6 @@ export default function App() {
   const [accounts, setAccounts] = useState([]);
   const [transactions, setTransactions] = useState([]);
   const [dayHistory, setDayHistory] = useState([]);
-  const [backendUrl, setBackendUrl] = useState(getBackendUrl());
-  const [isOfflineMode, setIsOfflineMode] = useState(false);
 
   const triggerNotification = (title, body) => {
     if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
@@ -90,65 +75,13 @@ export default function App() {
     setDayHistory(history);
   };
 
-  const checkConnection = async () => {
-    try {
-      const controller = new AbortController();
-      const id = setTimeout(() => controller.abort(), 1000);
-      const res = await fetch(`${backendUrl}/health`, { signal: controller.signal });
-      clearTimeout(id);
-      if (res.ok) {
-        setIsOfflineMode(false);
-        return true;
-      }
-    } catch (e) {
-      // Offline
-    }
-    setIsOfflineMode(true);
-    return false;
-  };
-
-  const loadData = async () => {
-    const isOnline = await checkConnection();
-    if (!isOnline) {
-      loadDataLocal();
-      return;
-    }
-    try {
-      const dayRes = await fetch(`${backendUrl}/api/day/active`);
-      const dayData = await dayRes.json();
-      if (dayData.success) {
-        setActiveDay(dayData.data);
-      } else {
-        setActiveDay(null);
-      }
-
-      const accRes = await fetch(`${backendUrl}/api/accounts`);
-      const accData = await accRes.json();
-      if (accData.success) {
-        setAccounts(accData.data);
-      }
-
-      const txRes = await fetch(`${backendUrl}/api/transactions`);
-      const txData = await txRes.json();
-      if (txData.success) {
-        setTransactions(txData.data);
-      }
-
-      const histRes = await fetch(`${backendUrl}/api/day/history`);
-      const histData = await histRes.json();
-      if (histData.success) {
-        setDayHistory(histData.data);
-      }
-    } catch (err) {
-      console.warn('API fetch failed, using local storage fallback.', err);
-      setIsOfflineMode(true);
-      loadDataLocal();
-    }
+  const loadData = () => {
+    loadDataLocal();
   };
 
   useEffect(() => {
     loadData();
-  }, [backendUrl]);
+  }, []);
 
   // --- Offline Mode Local Storage Implementations ---
 
@@ -232,10 +165,11 @@ export default function App() {
     return { success: true };
   };
 
-  const adjustPhysicalCashLocal = (closingCash) => {
+  const adjustPhysicalCashLocal = (closingCash, cashDenominations) => {
     const day = JSON.parse(localStorage.getItem('kiosk_active_day') || 'null');
     if (!day) return { success: false, error: 'No open ledger day' };
     day.closingCash = closingCash;
+    if (cashDenominations) day.cashDenominations = cashDenominations;
     localStorage.setItem('kiosk_active_day', JSON.stringify(day));
     loadDataLocal();
     return { success: true };
@@ -244,23 +178,7 @@ export default function App() {
   // --- Core Action Handlers ---
 
   const handleAddAccount = async (bankData) => {
-    if (isOfflineMode) return addAccountLocal(bankData);
-    try {
-      const res = await fetch(`${backendUrl}/api/accounts`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(bankData)
-      });
-      const data = await res.json();
-      if (data.success) {
-        await loadData();
-        return { success: true };
-      }
-      return { success: false, error: data.error };
-    } catch (err) {
-      setIsOfflineMode(true);
-      return addAccountLocal(bankData);
-    }
+    return addAccountLocal(bankData);
   };
 
   const handleSubmitTransaction = async (txData) => {
@@ -268,154 +186,48 @@ export default function App() {
     const txLabel = txData.type === 'Debit' ? 'Deposit (Cash In)' : 'Withdrawal (Cash Out)';
     const amountVal = txData.type === 'Debit' ? Math.abs(txData.customerAmount) : txData.cashOut;
 
-    if (isOfflineMode) {
-      const res = submitTransactionLocal(txData);
-      if (res.success) {
-        triggerNotification('Transaction Logged', `Recorded ${txLabel} of ${formatINR(amountVal)}`);
-      }
-      return res;
+    const res = submitTransactionLocal(txData);
+    if (res.success) {
+      triggerNotification('Transaction Logged', `Recorded ${txLabel} of ${formatINR(amountVal)}`);
     }
-    try {
-      const res = await fetch(`${backendUrl}/api/transactions`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(txData)
-      });
-      const data = await res.json();
-      if (data.success) {
-        await loadData();
-        triggerNotification('Transaction Logged', `Recorded ${txLabel} of ${formatINR(amountVal)}`);
-        return { success: true };
-      }
-      return { success: false, error: data.error };
-    } catch (err) {
-      setIsOfflineMode(true);
-      const res = submitTransactionLocal(txData);
-      if (res.success) {
-        triggerNotification('Transaction Logged', `Recorded ${txLabel} of ${formatINR(amountVal)} (offline)`);
-      }
-      return res;
-    }
+    return res;
   };
 
   const handleBulkUpdateBalances = async (payload) => {
-    if (isOfflineMode) return bulkUpdateBalancesLocal(payload);
-    try {
-      const res = await fetch(`${backendUrl}/api/accounts/bulk-update`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ accounts: payload })
-      });
-      const data = await res.json();
-      if (data.success) {
-        await loadData();
-        return { success: true };
-      }
-      return { success: false, error: data.error };
-    } catch (err) {
-      setIsOfflineMode(true);
-      return bulkUpdateBalancesLocal(payload);
-    }
+    return bulkUpdateBalancesLocal(payload);
   };
 
-  const handleAdjustCash = async (closingCash) => {
-    if (isOfflineMode) return adjustPhysicalCashLocal(closingCash);
-    try {
-      const res = await fetch(`${backendUrl}/api/day/adjust-cash`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ closingCash })
-      });
-      const data = await res.json();
-      if (data.success) {
-        await loadData();
-        return { success: true };
-      }
-      return { success: false, error: data.error };
-    } catch (err) {
-      setIsOfflineMode(true);
-      return adjustPhysicalCashLocal(closingCash);
-    }
+  const handleAdjustCash = async (closingCash, cashDenominations) => {
+    return adjustPhysicalCashLocal(closingCash, cashDenominations);
   };
 
   const handleUpdateCustomerName = async (id, customerName) => {
-    if (isOfflineMode) {
-      const txs = JSON.parse(localStorage.getItem('kiosk_transactions') || '[]');
-      const idx = txs.findIndex(t => t._id === id);
-      if (idx !== -1) {
-        txs[idx].customerName = customerName;
-        localStorage.setItem('kiosk_transactions', JSON.stringify(txs));
-      }
-      loadDataLocal();
-      return { success: true };
+    const txs = JSON.parse(localStorage.getItem('kiosk_transactions') || '[]');
+    const idx = txs.findIndex(t => t._id === id);
+    if (idx !== -1) {
+      txs[idx].customerName = customerName;
+      localStorage.setItem('kiosk_transactions', JSON.stringify(txs));
     }
-    try {
-      const res = await fetch(`${backendUrl}/api/transactions/${id}/name`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ customerName })
-      });
-      const data = await res.json();
-      if (data.success) {
-        await loadData();
-        return { success: true };
-      }
-      return { success: false, error: data.error };
-    } catch (err) {
-      const txs = JSON.parse(localStorage.getItem('kiosk_transactions') || '[]');
-      const idx = txs.findIndex(t => t._id === id);
-      if (idx !== -1) {
-        txs[idx].customerName = customerName;
-        localStorage.setItem('kiosk_transactions', JSON.stringify(txs));
-      }
-      loadDataLocal();
-      return { success: true };
-    }
+    loadDataLocal();
+    return { success: true };
   };
 
-  const handleOpenDay = async (date, openingCash) => {
-    if (isOfflineMode) {
-      const active = JSON.parse(localStorage.getItem('kiosk_active_day') || 'null');
-      if (active && active.status === 'Open') return { success: false, error: 'Day already open' };
-      const day = {
-        date,
-        openingCash,
-        closingCash: openingCash,
-        totalProfit: 0,
-        status: 'Open'
-      };
-      localStorage.setItem('kiosk_active_day', JSON.stringify(day));
-      loadDataLocal();
-      triggerNotification('Ledger Open', `Ledger opened for ${date} with ₹${openingCash.toLocaleString('en-IN')} cash.`);
-      return { success: true };
-    }
-    try {
-      const res = await fetch(`${backendUrl}/api/day/open`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ date, openingCash })
-      });
-      const data = await res.json();
-      if (data.success) {
-        await loadData();
-        triggerNotification('Ledger Open', `Ledger opened for ${date} with ₹${openingCash.toLocaleString('en-IN')} cash.`);
-        return { success: true };
-      }
-      return { success: false, error: data.error };
-    } catch (err) {
-      setIsOfflineMode(true);
-      const day = {
-        date,
-        openingCash,
-        closingCash: openingCash,
-        totalProfit: 0,
-        status: 'Open'
-      };
-      localStorage.setItem('kiosk_active_day', JSON.stringify(day));
-      loadDataLocal();
-      triggerNotification('Ledger Open', `Ledger opened for ${date} with ₹${openingCash.toLocaleString('en-IN')} cash (offline).`);
-      return { success: true };
-    }
+  const handleOpenDay = async (date, openingCash, cashDenominations) => {
+    const defaultDenoms = cashDenominations || { n500: 0, n200: 0, n100: 0, n50: 0, n20: 0, n10: 0, coins: 0 };
+    const active = JSON.parse(localStorage.getItem('kiosk_active_day') || 'null');
+    if (active && active.status === 'Open') return { success: false, error: 'Day already open' };
+    const day = {
+      date,
+      openingCash,
+      closingCash: openingCash,
+      totalProfit: 0,
+      status: 'Open',
+      cashDenominations: defaultDenoms
+    };
+    localStorage.setItem('kiosk_active_day', JSON.stringify(day));
+    loadDataLocal();
+    triggerNotification('Ledger Open', `Ledger opened for ${date} with ₹${openingCash.toLocaleString('en-IN')} cash.`);
+    return { success: true };
   };
 
   const handleCloseDay = async () => {
@@ -428,92 +240,37 @@ export default function App() {
       return bankBals;
     };
 
-    if (isOfflineMode) {
-      const day = JSON.parse(localStorage.getItem('kiosk_active_day') || 'null');
-      if (!day) return { success: false, error: 'No open ledger' };
-      day.status = 'Closed';
-      day.bankBalances = buildLocalBalancesSnapshot();
+    const day = JSON.parse(localStorage.getItem('kiosk_active_day') || 'null');
+    if (!day) return { success: false, error: 'No open ledger' };
+    day.status = 'Closed';
+    day.bankBalances = buildLocalBalancesSnapshot();
 
-      const history = JSON.parse(localStorage.getItem('kiosk_day_history') || '[]');
-      const filtered = history.filter(h => h.date !== day.date);
-      filtered.unshift(day);
-      localStorage.setItem('kiosk_day_history', JSON.stringify(filtered));
+    const history = JSON.parse(localStorage.getItem('kiosk_day_history') || '[]');
+    const filtered = history.filter(h => h.date !== day.date);
+    filtered.unshift(day);
+    localStorage.setItem('kiosk_day_history', JSON.stringify(filtered));
 
-      localStorage.setItem('kiosk_active_day', 'null');
-      loadDataLocal();
-      triggerNotification('Ledger Closed', `Ledger closed for ${day.date}. EOD report recorded.`);
-      return { success: true };
-    }
-    try {
-      const res = await fetch(`${backendUrl}/api/day/close`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' }
-      });
-      const data = await res.json();
-      if (data.success) {
-        await loadData();
-        triggerNotification('Ledger Closed', `Ledger closed. EOD report recorded.`);
-        return { success: true };
-      }
-      return { success: false, error: data.error };
-    } catch (err) {
-      setIsOfflineMode(true);
-      const day = JSON.parse(localStorage.getItem('kiosk_active_day') || 'null');
-      if (day) {
-        day.status = 'Closed';
-        day.bankBalances = buildLocalBalancesSnapshot();
-        const history = JSON.parse(localStorage.getItem('kiosk_day_history') || '[]');
-        const filtered = history.filter(h => h.date !== day.date);
-        filtered.unshift(day);
-        localStorage.setItem('kiosk_day_history', JSON.stringify(filtered));
-        localStorage.setItem('kiosk_active_day', 'null');
-      }
-      loadDataLocal();
-      triggerNotification('Ledger Closed', `Ledger closed (offline). EOD report recorded.`);
-      return { success: true };
-    }
+    localStorage.setItem('kiosk_active_day', 'null');
+    loadDataLocal();
+    triggerNotification('Ledger Closed', `Ledger closed for ${day.date}. EOD report recorded.`);
+    return { success: true };
   };
 
   const handleReopenDay = async (date) => {
-    const reopenDayLocal = (d) => {
-      const history = JSON.parse(localStorage.getItem('kiosk_day_history') || '[]');
-      const idx = history.findIndex(h => h.date === d);
-      if (idx === -1) return { success: false, error: 'Ledger date not found in history' };
+    const history = JSON.parse(localStorage.getItem('kiosk_day_history') || '[]');
+    const idx = history.findIndex(h => h.date === date);
+    if (idx === -1) return { success: false, error: 'Ledger date not found in history' };
 
-      const day = history[idx];
-      day.status = 'Open';
+    const day = history[idx];
+    day.status = 'Open';
 
-      history.splice(idx, 1);
-      localStorage.setItem('kiosk_day_history', JSON.stringify(history));
-      localStorage.setItem('kiosk_active_day', JSON.stringify(day));
+    history.splice(idx, 1);
+    localStorage.setItem('kiosk_day_history', JSON.stringify(history));
+    localStorage.setItem('kiosk_active_day', JSON.stringify(day));
 
-      loadDataLocal();
-      triggerNotification('Ledger Reopened', `Ledger reopened for today.`);
-      return { success: true };
-    };
-
-    if (isOfflineMode) return reopenDayLocal(date);
-    try {
-      const res = await fetch(`${backendUrl}/api/day/reopen`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ date })
-      });
-      const data = await res.json();
-      if (data.success) {
-        await loadData();
-        triggerNotification('Ledger Reopened', `Ledger reopened for today.`);
-        return { success: true };
-      }
-      return { success: false, error: data.error };
-    } catch (err) {
-      setIsOfflineMode(true);
-      const res = reopenDayLocal(date);
-      if (res.success) {
-        triggerNotification('Ledger Reopened', `Ledger reopened (offline).`);
-      }
-      return res;
-    }
+    loadDataLocal();
+    triggerNotification('Ledger Reopened', `Ledger reopened for today.`);
+    return { success: true };
   };
 
   const handleResetPin = () => {
@@ -534,14 +291,14 @@ export default function App() {
       {/* Mobile Top App Header */}
       <header className="sticky top-0 z-40 bg-slate-900/90 backdrop-blur-md border-b border-slate-800/80 h-14 flex items-center justify-between px-4">
         <div className="flex items-center gap-1.5">
-          <div className={`w-2.5 h-2.5 rounded-full ${isOfflineMode ? 'bg-amber-500' : 'bg-emerald-500 animate-pulse'}`}></div>
+          <div className="w-2.5 h-2.5 rounded-full bg-amber-500"></div>
           <h1 className="font-extrabold text-sm tracking-wide text-slate-100 uppercase">Kiosk Ledger</h1>
         </div>
         
         {/* Connection Status Indicator */}
         <div className="flex items-center gap-1 text-[10px] bg-slate-950 border border-slate-800 text-slate-400 px-2 py-0.5 rounded-full">
           <ShieldCheck className="w-3.5 h-3.5 text-amber-500" />
-          <span>{isOfflineMode ? 'Local Mode' : 'Cloud Connected'}</span>
+          <span>Local Mode</span>
         </div>
       </header>
 
@@ -570,16 +327,16 @@ export default function App() {
             accounts={accounts}
             transactions={transactions}
             dayHistory={dayHistory}
+            activeDay={activeDay}
             onAddAccount={handleAddAccount}
             onBulkUpdateBalances={handleBulkUpdateBalances}
             onUpdateCustomerName={handleUpdateCustomerName}
+            onSubmitTransaction={handleSubmitTransaction}
           />
         )}
         {activeTab === 'settings' && (
           <Settings
             activeDay={activeDay}
-            backendUrl={backendUrl}
-            isOfflineMode={isOfflineMode}
             dayHistory={dayHistory}
             transactions={transactions}
             onOpenDay={handleOpenDay}
@@ -587,6 +344,7 @@ export default function App() {
             onReopenDay={handleReopenDay}
             onReloadData={loadData}
             onResetPin={handleResetPin}
+            onAdjustCash={handleAdjustCash}
           />
         )}
       </main>

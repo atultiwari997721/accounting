@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Landmark, ArrowRightLeft, DollarSign, Wallet, Percent, CheckCircle2, AlertTriangle, TrendingUp, TrendingDown, HelpCircle } from 'lucide-react';
+import { Landmark, ArrowRightLeft, DollarSign, Wallet, Percent, CheckCircle2, AlertTriangle, TrendingUp, TrendingDown, HelpCircle, Calculator, PlusCircle, UserCheck } from 'lucide-react';
+import DenominationModal from './DenominationModal';
 
 export default function TransactionForm({ activeDay, accounts, onSubmitTransaction, onNavigateToAccounts, onOpenDay }) {
   const [amount, setAmount] = useState('');
@@ -9,13 +10,21 @@ export default function TransactionForm({ activeDay, accounts, onSubmitTransacti
   const [errorMsg, setErrorMsg] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
   const [quickOpeningCash, setQuickOpeningCash] = useState('');
+  const [showDenomModal, setShowDenomModal] = useState(false);
+  const [quickDenoms, setQuickDenoms] = useState({ n500: 0, n200: 0, n100: 0, n50: 0, n20: 0, n10: 0, coins: 0 });
+
+  // Jama (Advance Deposit) Modal State
+  const [showJamaModal, setShowJamaModal] = useState(false);
+  const [jamaCustomerName, setJamaCustomerName] = useState('');
+  const [jamaAmount, setJamaAmount] = useState('');
+  const [jamaMethod, setJamaMethod] = useState('cash'); // 'cash' | 'bank'
 
   const handleQuickOpen = async () => {
     setErrorMsg('');
     setSuccessMsg('');
     const today = new Date().toISOString().split('T')[0];
     const cashAmount = Number(quickOpeningCash) || 0;
-    const result = await onOpenDay(today, cashAmount);
+    const result = await onOpenDay(today, cashAmount, quickDenoms);
     if (result.success) {
       setSuccessMsg(`Ledger opened for today with ${formatINR(cashAmount)} starting cash!`);
       setQuickOpeningCash('');
@@ -31,7 +40,7 @@ export default function TransactionForm({ activeDay, accounts, onSubmitTransacti
     }
   }, [accounts, selectedBankId]);
 
-  const [commissionMode, setCommissionMode] = useState('deducted'); // deducted | cash | bank
+  const [commissionMode, setCommissionMode] = useState('deducted'); // deducted | cash | bank | udhar
   const [customerName, setCustomerName] = useState('');
   const [txType, setTxType] = useState('Credit'); // 'Credit' = Cash Out (Withdrawal), 'Debit' = Cash In (Deposit)
 
@@ -39,11 +48,6 @@ export default function TransactionForm({ activeDay, accounts, onSubmitTransacti
   // 1% Commission Model calculations
   const commission = Math.round(numAmount * 0.01 * 100) / 100; // Rs 10 charged per Rs 1000
 
-  // Calculate parameters based on Mode and Transaction Type:
-  // 1. targetCustomerAmount (bank balance change: positive for credits, negative for debits)
-  // 2. targetCashOut (physical cash change: positive for payouts, negative for cash received)
-  // 3. initialCashRequired (for withdrawals)
-  // 4. initialBankRequired (for deposits)
   let targetCustomerAmount = 0;
   let targetCashOut = 0;
   let initialCashRequired = 0;
@@ -60,27 +64,35 @@ export default function TransactionForm({ activeDay, accounts, onSubmitTransacti
       initialCashRequired = numAmount - commission;
     } else if (commissionMode === 'cash') {
       targetCustomerAmount = numAmount;
-      targetCashOut = numAmount - commission; // Give 1000, get 10 cash back = net 990
-      initialCashRequired = numAmount; // need 1000 in hand first
+      targetCashOut = numAmount - commission;
+      initialCashRequired = numAmount;
     } else if (commissionMode === 'bank') {
       targetCustomerAmount = numAmount + commission;
       targetCashOut = numAmount;
+      initialCashRequired = numAmount;
+    } else if (commissionMode === 'udhar') {
+      targetCustomerAmount = 0; // Customer hasn't transferred money online yet (Udhar!)
+      targetCashOut = numAmount; // Physical cash given out to customer
       initialCashRequired = numAmount;
     }
   } else {
     // Cash In (Deposit)
     if (commissionMode === 'deducted') {
-      targetCustomerAmount = -(numAmount - commission); // send 990 from bank
-      targetCashOut = -numAmount; // receive 1000 cash in drawer
-      initialBankRequired = numAmount - commission; // need 990 in bank
+      targetCustomerAmount = -(numAmount - commission);
+      targetCashOut = -numAmount;
+      initialBankRequired = numAmount - commission;
     } else if (commissionMode === 'cash') {
-      targetCustomerAmount = -numAmount; // send 1000 from bank
-      targetCashOut = -(numAmount + commission); // receive 1010 cash in drawer
-      initialBankRequired = numAmount; // need 1000 in bank
+      targetCustomerAmount = -numAmount;
+      targetCashOut = -(numAmount + commission);
+      initialBankRequired = numAmount;
     } else if (commissionMode === 'bank') {
-      targetCustomerAmount = -numAmount; // send 1000 from bank
-      targetCashOut = -numAmount; // receive 1000 cash in drawer
-      initialBankRequired = numAmount; // need 1000 in bank
+      targetCustomerAmount = -numAmount;
+      targetCashOut = -numAmount;
+      initialBankRequired = numAmount;
+    } else if (commissionMode === 'udhar') {
+      targetCustomerAmount = -numAmount; // Sent online transfer to customer
+      targetCashOut = 0; // Customer hasn't paid cash yet (Udhar!)
+      initialBankRequired = numAmount;
     }
   }
 
@@ -104,6 +116,11 @@ export default function TransactionForm({ activeDay, accounts, onSubmitTransacti
       return;
     }
 
+    if (commissionMode === 'udhar' && (!customerName || !customerName.trim())) {
+      setErrorMsg('Customer Name is REQUIRED for Udhar (Credit) transactions!');
+      return;
+    }
+
     if (txType === 'Credit') {
       if (initialCashRequired > activeDay.closingCash) {
         setErrorMsg(`Insufficient Cash in Hand! You need at least ${formatINR(initialCashRequired)} available.`);
@@ -124,7 +141,12 @@ export default function TransactionForm({ activeDay, accounts, onSubmitTransacti
     setShowCommModal(false);
     setIsSubmitting(true);
 
-    // Recalculate dynamic signed totals based on the finalized mode chosen in the modal
+    if (selectedMode === 'udhar' && (!customerName || !customerName.trim())) {
+      setErrorMsg('Customer Name is REQUIRED for Udhar (Credit) transactions!');
+      setIsSubmitting(false);
+      return;
+    }
+
     let finalCustomerAmount = 0;
     let finalCashOut = 0;
 
@@ -137,9 +159,12 @@ export default function TransactionForm({ activeDay, accounts, onSubmitTransacti
         finalCashOut = numAmount - comm;
       } else if (selectedMode === 'cash') {
         finalCustomerAmount = numAmount;
-        finalCashOut = numAmount - comm; // Customer pays extra cash in hand
+        finalCashOut = numAmount - comm;
       } else if (selectedMode === 'bank') {
         finalCustomerAmount = numAmount + comm;
+        finalCashOut = numAmount;
+      } else if (selectedMode === 'udhar') {
+        finalCustomerAmount = 0; // Customer owes money
         finalCashOut = numAmount;
       }
     } else {
@@ -152,6 +177,9 @@ export default function TransactionForm({ activeDay, accounts, onSubmitTransacti
       } else if (selectedMode === 'bank') {
         finalCustomerAmount = -numAmount;
         finalCashOut = -numAmount;
+      } else if (selectedMode === 'udhar') {
+        finalCustomerAmount = -numAmount;
+        finalCashOut = 0;
       }
     }
 
@@ -163,11 +191,11 @@ export default function TransactionForm({ activeDay, accounts, onSubmitTransacti
         profit: comm,
         customerName: customerName ? customerName.trim() : '',
         type: txType,
-        commissionMode: selectedMode.charAt(0).toUpperCase() + selectedMode.slice(1)
+        commissionMode: selectedMode === 'udhar' ? 'Udhar' : selectedMode.charAt(0).toUpperCase() + selectedMode.slice(1)
       });
       
       if (result.success) {
-        setSuccessMsg(`Success! Recorded ${txType === 'Credit' ? 'Withdrawal' : 'Deposit'} with ${selectedMode} commission.`);
+        setSuccessMsg(`Success! Recorded ${txType === 'Credit' ? 'Withdrawal' : 'Deposit'} [Mode: ${selectedMode.toUpperCase()}].`);
         setAmount('');
         setCustomerName('');
       } else {
@@ -180,18 +208,81 @@ export default function TransactionForm({ activeDay, accounts, onSubmitTransacti
     }
   };
 
+  const handleJamaSubmit = async (e) => {
+    e.preventDefault();
+    setErrorMsg('');
+    setSuccessMsg('');
+
+    if (!jamaCustomerName.trim()) {
+      setErrorMsg('Customer Name is required for Jama (Advance Deposit).');
+      return;
+    }
+    const amt = Number(jamaAmount) || 0;
+    if (amt <= 0) {
+      setErrorMsg('Please enter a valid Jama amount.');
+      return;
+    }
+
+    if (!selectedBankId && jamaMethod === 'bank') {
+      setErrorMsg('Please select a Bank Account for online Jama.');
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      // Jama transaction:
+      // If cash: cashIn hand increases (cashOut = -amt), bankAmount = 0
+      // If bank: bank currentBalance increases (customerAmount = +amt), cashOut = 0
+      const result = await onSubmitTransaction({
+        bankAccountId: selectedBankId || accounts[0]?._id,
+        customerAmount: jamaMethod === 'bank' ? amt : 0,
+        cashOut: jamaMethod === 'cash' ? -amt : 0,
+        profit: 0,
+        customerName: jamaCustomerName.trim(),
+        type: 'Jama',
+        commissionMode: 'Jama'
+      });
+
+      if (result.success) {
+        setSuccessMsg(`Jama of ${formatINR(amt)} for ${jamaCustomerName.trim()} recorded successfully!`);
+        setShowJamaModal(false);
+        setJamaCustomerName('');
+        setJamaAmount('');
+      } else {
+        setErrorMsg(result.error || 'Failed to record Jama.');
+      }
+    } catch (err) {
+      setErrorMsg('Network error while saving Jama.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
   return (
     <div className="flex flex-col gap-4 px-4 pt-4 select-none">
-      <div className="flex flex-col gap-1">
-        <h2 className="text-lg font-bold text-slate-100 flex items-center gap-2">
-          <ArrowRightLeft className="w-5 h-5 text-amber-400" /> New Transaction
-        </h2>
-        <p className="text-xs text-slate-400">
-          {txType === 'Credit' 
-            ? "Log customer's bank transfer & hand out physical cash"
-            : "Receive customer's cash & send online bank transfer"
-          }
-        </p>
+      <div className="flex justify-between items-center">
+        <div className="flex flex-col gap-1">
+          <h2 className="text-lg font-bold text-slate-100 flex items-center gap-2">
+            <ArrowRightLeft className="w-5 h-5 text-amber-400" /> New Transaction
+          </h2>
+          <p className="text-xs text-slate-400">
+            Log Cash Withdrawals, Cash Deposits, Udhar, or Jama Advances
+          </p>
+        </div>
+
+        {activeDay && (
+          <button
+            type="button"
+            onClick={() => {
+              setErrorMsg('');
+              setSuccessMsg('');
+              setShowJamaModal(true);
+            }}
+            className="px-3 py-1.5 bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all shadow-sm"
+          >
+            <PlusCircle className="w-4 h-4" /> Add Jama (Advance)
+          </button>
+        )}
       </div>
 
       {!activeDay && (
@@ -200,7 +291,7 @@ export default function TransactionForm({ activeDay, accounts, onSubmitTransacti
             <AlertTriangle className="w-5 h-5 text-red-400 shrink-0 mt-0.5" />
             <div className="flex flex-col gap-0.5">
               <h4 className="text-xs font-bold text-red-400">Day Summary is Closed</h4>
-              <p className="text-[10px] text-slate-300">Open the day ledger directly below to begin logging withdrawals.</p>
+              <p className="text-[10px] text-slate-300">Open the day ledger directly below to begin logging transactions.</p>
             </div>
           </div>
           
@@ -214,6 +305,15 @@ export default function TransactionForm({ activeDay, accounts, onSubmitTransacti
               onChange={(e) => setQuickOpeningCash(e.target.value.replace(/[^0-9]/g, ''))}
               className="flex-1 h-9 px-2 text-xs bg-slate-900 border border-slate-800 rounded-lg focus:border-amber-500 focus:outline-none font-bold text-slate-100 placeholder:text-slate-600"
             />
+
+            <button
+              type="button"
+              onClick={() => setShowDenomModal(true)}
+              className="h-9 px-2.5 bg-slate-800 hover:bg-slate-700 text-amber-400 border border-slate-700 text-xs font-bold rounded-lg flex items-center gap-1 transition-all"
+            >
+              <Calculator className="w-3.5 h-3.5" /> Notes
+            </button>
+
             <button
               type="button"
               onClick={handleQuickOpen}
@@ -253,7 +353,7 @@ export default function TransactionForm({ activeDay, accounts, onSubmitTransacti
               }}
               className={`flex-1 h-8 rounded-lg text-xs font-bold transition-all ${
                 txType === 'Credit'
-                  ? 'bg-amber-450 text-slate-950 bg-amber-400'
+                  ? 'bg-amber-400 text-slate-950 font-extrabold'
                   : 'text-slate-400 hover:text-slate-200'
               }`}
             >
@@ -268,7 +368,7 @@ export default function TransactionForm({ activeDay, accounts, onSubmitTransacti
               }}
               className={`flex-1 h-8 rounded-lg text-xs font-bold transition-all ${
                 txType === 'Debit'
-                  ? 'bg-amber-450 text-slate-950 bg-amber-400'
+                  ? 'bg-amber-400 text-slate-950 font-extrabold'
                   : 'text-slate-400 hover:text-slate-200'
               }`}
             >
@@ -303,18 +403,20 @@ export default function TransactionForm({ activeDay, accounts, onSubmitTransacti
             </div>
           </div>
 
-          {/* Optional Customer Name Input */}
+          {/* Customer Name Input */}
           <div className="flex flex-col gap-1.5">
-            <label className="text-[10px] uppercase font-bold tracking-wider text-slate-400">
-              Customer Name (Optional)
-            </label>
+            <div className="flex justify-between items-center">
+              <label className="text-[10px] uppercase font-bold tracking-wider text-slate-400">
+                Customer Name {commissionMode === 'udhar' ? '(REQUIRED for Udhar)' : '(Optional)'}
+              </label>
+            </div>
             <input
               type="text"
               placeholder="e.g. Rahul Sharma"
               value={customerName}
               onChange={(e) => setCustomerName(e.target.value)}
               disabled={!activeDay}
-              className="w-full h-11 bg-slate-900 border border-slate-800 focus:border-amber-500 focus:ring-1 focus:ring-amber-500 text-slate-100 rounded-xl px-4 focus:outline-none text-xs transition-all placeholder:text-slate-600 disabled:opacity-50 font-bold"
+              className={`w-full h-11 bg-slate-900 border ${commissionMode === 'udhar' ? 'border-red-500/50' : 'border-slate-800'} focus:border-amber-500 focus:ring-1 focus:ring-amber-500 text-slate-100 rounded-xl px-4 focus:outline-none text-xs transition-all placeholder:text-slate-600 disabled:opacity-50 font-bold`}
             />
           </div>
 
@@ -374,6 +476,7 @@ export default function TransactionForm({ activeDay, accounts, onSubmitTransacti
                     {commissionMode === 'deducted' && `Gave ₹${numAmount - commission} (₹10 cut)`}
                     {commissionMode === 'cash' && `Gave ₹${numAmount} cash. Customer paid ₹${commission} extra cash.`}
                     {commissionMode === 'bank' && `Gave ₹${numAmount} cash.`}
+                    {commissionMode === 'udhar' && `Gave ₹${numAmount} cash on UDHAR.`}
                   </span>
                 </div>
               ) : (
@@ -382,12 +485,13 @@ export default function TransactionForm({ activeDay, accounts, onSubmitTransacti
                     <Wallet className="w-3 h-3 text-emerald-400" /> Physical Cash In drawer
                   </span>
                   <span className="text-lg font-bold text-emerald-400 tracking-tight mt-0.5">
-                    {formatINR(commissionMode === 'cash' ? numAmount + commission : numAmount)}
+                    {formatINR(commissionMode === 'cash' ? numAmount + commission : (commissionMode === 'udhar' ? 0 : numAmount))}
                   </span>
                   <span className="text-[8px] text-slate-500 leading-tight">
                     {commissionMode === 'deducted' && `Received ₹${numAmount} cash.`}
                     {commissionMode === 'cash' && `Received ₹${numAmount} + ₹${commission} extra cash.`}
                     {commissionMode === 'bank' && `Received ₹${numAmount} cash.`}
+                    {commissionMode === 'udhar' && `Service given on UDHAR (no cash received now).`}
                   </span>
                 </div>
               )}
@@ -398,12 +502,13 @@ export default function TransactionForm({ activeDay, accounts, onSubmitTransacti
                   <span className="text-[10px] text-slate-400 flex items-center gap-1">
                     <TrendingUp className="w-3 h-3 text-emerald-400" /> Bank Balance Added
                   </span>
-                  <span className="text-lg font-bold text-emerald-455 text-emerald-400 tracking-tight mt-0.5">
-                    {formatINR(commissionMode === 'bank' ? numAmount + commission : numAmount)}
+                  <span className="text-lg font-bold text-emerald-400 tracking-tight mt-0.5">
+                    {formatINR(commissionMode === 'bank' ? numAmount + commission : (commissionMode === 'udhar' ? 0 : numAmount))}
                   </span>
                   <span className="text-[8px] text-slate-500 leading-tight">
                     {commissionMode === 'bank' && `Transferred ₹${numAmount + commission}`}
-                    {commissionMode !== 'bank' && `Transferred ₹${numAmount}`}
+                    {commissionMode === 'udhar' && `Customer will pay later (UDHAR)`}
+                    {commissionMode !== 'bank' && commissionMode !== 'udhar' && `Transferred ₹${numAmount}`}
                   </span>
                 </div>
               ) : (
@@ -423,22 +528,23 @@ export default function TransactionForm({ activeDay, accounts, onSubmitTransacti
             </div>
 
             {/* Profit Bar */}
-            <div className="bg-slate-955/30 bg-slate-950/30 border border-slate-900 px-3 py-2 rounded-xl flex justify-between items-center">
+            <div className="bg-slate-950/30 border border-slate-900 px-3 py-2 rounded-xl flex justify-between items-center">
               <span className="text-[9px] text-slate-400 font-bold uppercase tracking-wide">Net Commission Profit</span>
               <span className="text-sm font-bold text-emerald-400">{formatINR(commission)}</span>
             </div>
           </div>
 
-          {/* Commission Mode Selector */}
+          {/* Payment / Commission Mode Selector */}
           <div className="flex flex-col gap-1.5">
             <label className="text-[10px] uppercase font-bold tracking-wider text-slate-400">
-              Commission Paid Via
+              Payment & Commission Handling
             </label>
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
               {[
-                { id: 'deducted', label: 'Deducted', desc: 'Give 990 / Trf 1000' },
-                { id: 'cash', label: 'Extra Cash', desc: 'Give 1000 / Get 10' },
-                { id: 'bank', label: 'Extra Online', desc: 'Give 1000 / Trf 1010' }
+                { id: 'deducted', label: 'Deducted', desc: 'Cut 1% from Payout' },
+                { id: 'cash', label: 'Extra Cash', desc: 'Customer Pays Cash' },
+                { id: 'bank', label: 'Extra Online', desc: 'Transfers to Bank' },
+                { id: 'udhar', label: 'UDHAR (Credit)', desc: 'Unpaid / Pay Later' }
               ].map(mode => {
                 const isActive = commissionMode === mode.id;
                 return (
@@ -452,12 +558,14 @@ export default function TransactionForm({ activeDay, accounts, onSubmitTransacti
                     }}
                     className={`p-2 rounded-xl border flex flex-col items-center justify-center text-center gap-0.5 transition-all ${
                       isActive
-                        ? 'bg-amber-500/10 border-amber-400 text-slate-100 shadow-[0_0_8px_rgba(251,191,36,0.15)]'
+                        ? mode.id === 'udhar'
+                          ? 'bg-red-500/10 border-red-400 text-red-300 shadow-[0_0_8px_rgba(239,68,68,0.2)]'
+                          : 'bg-amber-500/10 border-amber-400 text-slate-100 shadow-[0_0_8px_rgba(251,191,36,0.15)]'
                         : 'bg-slate-900/50 border-slate-800 text-slate-500 hover:border-slate-700'
                     }`}
                   >
                     <span className="text-xs font-bold">{mode.label}</span>
-                    <span className="text-[7px] font-semibold text-slate-500 truncate w-full">{mode.desc}</span>
+                    <span className="text-[7.5px] font-semibold text-slate-500 truncate w-full">{mode.desc}</span>
                   </button>
                 );
               })}
@@ -482,17 +590,22 @@ export default function TransactionForm({ activeDay, accounts, onSubmitTransacti
           <button
             type="submit"
             disabled={!activeDay || accounts.length === 0 || numAmount <= 0 || isSubmitting}
-            className="w-full h-12 rounded-xl bg-amber-400 hover:bg-amber-500 text-slate-950 font-bold text-sm tracking-wide shadow-lg active:scale-[0.98] transition-all disabled:opacity-50 disabled:active:scale-100 flex items-center justify-center gap-2 animate-pulse"
+            className={`w-full h-12 rounded-xl font-bold text-sm tracking-wide shadow-lg active:scale-[0.98] transition-all disabled:opacity-50 disabled:active:scale-100 flex items-center justify-center gap-2 ${
+              commissionMode === 'udhar'
+                ? 'bg-red-500 hover:bg-red-600 text-slate-950 font-extrabold'
+                : 'bg-amber-400 hover:bg-amber-500 text-slate-950'
+            }`}
           >
             {isSubmitting ? (
               <div className="w-5 h-5 border-2 border-slate-950 border-t-transparent rounded-full animate-spin"></div>
             ) : (
-              'Confirm Cash Withdrawal'
+              commissionMode === 'udhar' ? 'Confirm UDHAR (Credit Entry)' : 'Confirm Transaction'
             )}
           </button>
         </form>
       )}
 
+      {/* Confirmation Modal */}
       {showCommModal && (
         <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-4">
           <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 w-full max-w-sm flex flex-col gap-4 text-center shadow-2xl animate-in fade-in zoom-in-95 duration-150">
@@ -501,81 +614,169 @@ export default function TransactionForm({ activeDay, accounts, onSubmitTransacti
             </div>
             
             <div>
-              <h3 className="text-sm font-bold text-slate-100 uppercase tracking-wide">Select Commission Payment</h3>
+              <h3 className="text-sm font-bold text-slate-100 uppercase tracking-wide">Confirm Payment Method</h3>
               <p className="text-[11px] text-slate-400 mt-1.5 leading-relaxed">
-                For this <span className="text-slate-200 font-bold">{formatINR(numAmount)}</span> {txType === 'Credit' ? 'Withdrawal' : 'Deposit'}, choose how the customer is paying the <span className="text-emerald-400 font-bold">1% Commission ({formatINR(commission)})</span>:
+                For this <span className="text-slate-200 font-bold">{formatINR(numAmount)}</span> {txType === 'Credit' ? 'Withdrawal' : 'Deposit'}, confirm how payment/commission is settled:
               </p>
             </div>
 
-            <div className="flex flex-col gap-2.5 mt-1">
-              {/* Option 1: Cut from Amount */}
+            <div className="flex flex-col gap-2 mt-1">
               <button
                 type="button"
                 onClick={() => confirmAndSubmitTransaction('deducted')}
-                className="w-full py-3 px-3.5 bg-slate-950 hover:bg-slate-850 border border-slate-800 hover:border-amber-500/50 rounded-2xl flex flex-col items-start gap-1 text-left active:scale-[0.98] transition-all group"
+                className="w-full py-2.5 px-3.5 bg-slate-950 hover:bg-slate-850 border border-slate-800 hover:border-amber-500/50 rounded-2xl flex justify-between items-center text-left transition-all"
               >
-                <div className="flex justify-between items-center w-full">
-                  <span className="text-xs font-bold text-slate-100 group-hover:text-amber-300">
-                    1. Cut from {formatINR(numAmount)}
-                  </span>
-                  <span className="text-[9px] font-bold text-amber-400/80 bg-amber-400/10 px-2 py-0.5 rounded-md">Cut Payout</span>
-                </div>
-                <span className="text-[9.5px] text-slate-400 leading-tight">
-                  {txType === 'Credit'
-                    ? `Give customer ${formatINR(numAmount - commission)} cash (Cut ${formatINR(commission)}). Bank credited ${formatINR(numAmount)}.`
-                    : `Transfer customer ${formatINR(numAmount - commission)} online. Customer gives ${formatINR(numAmount)} cash.`}
-                </span>
+                <span className="text-xs font-bold text-slate-100">1. Deducted (Cut Payout)</span>
+                <span className="text-[9px] font-bold text-amber-400 bg-amber-400/10 px-2 py-0.5 rounded">Deducted</span>
               </button>
 
-              {/* Option 2: Give Extra Cash */}
               <button
                 type="button"
                 onClick={() => confirmAndSubmitTransaction('cash')}
-                className="w-full py-3 px-3.5 bg-slate-950 hover:bg-slate-850 border border-slate-800 hover:border-emerald-500/50 rounded-2xl flex flex-col items-start gap-1 text-left active:scale-[0.98] transition-all group"
+                className="w-full py-2.5 px-3.5 bg-slate-950 hover:bg-slate-850 border border-slate-800 hover:border-emerald-500/50 rounded-2xl flex justify-between items-center text-left transition-all"
               >
-                <div className="flex justify-between items-center w-full">
-                  <span className="text-xs font-bold text-slate-100 group-hover:text-emerald-300">
-                    2. Customer Gives Extra {formatINR(commission)} Cash
-                  </span>
-                  <span className="text-[9px] font-bold text-emerald-400/80 bg-emerald-400/10 px-2 py-0.5 rounded-md">Extra Cash</span>
-                </div>
-                <span className="text-[9.5px] text-slate-400 leading-tight">
-                  {txType === 'Credit'
-                    ? `Give customer full ${formatINR(numAmount)} cash. Customer hands you ${formatINR(commission)} extra cash in hand.`
-                    : `Transfer customer ${formatINR(numAmount)} online. Customer hands you ${formatINR(numAmount + commission)} cash.`}
-                </span>
+                <span className="text-xs font-bold text-slate-100">2. Extra Cash Paid</span>
+                <span className="text-[9px] font-bold text-emerald-400 bg-emerald-400/10 px-2 py-0.5 rounded">Cash</span>
               </button>
 
-              {/* Option 3: Pay Online on Account */}
               <button
                 type="button"
                 onClick={() => confirmAndSubmitTransaction('bank')}
-                className="w-full py-3 px-3.5 bg-slate-950 hover:bg-slate-850 border border-slate-800 hover:border-cyan-500/50 rounded-2xl flex flex-col items-start gap-1 text-left active:scale-[0.98] transition-all group"
+                className="w-full py-2.5 px-3.5 bg-slate-950 hover:bg-slate-850 border border-slate-800 hover:border-cyan-500/50 rounded-2xl flex justify-between items-center text-left transition-all"
               >
-                <div className="flex justify-between items-center w-full">
-                  <span className="text-xs font-bold text-slate-100 group-hover:text-cyan-300">
-                    3. Customer Pays Online to Account
-                  </span>
-                  <span className="text-[9px] font-bold text-cyan-400/80 bg-cyan-400/10 px-2 py-0.5 rounded-md">Extra Online</span>
-                </div>
-                <span className="text-[9.5px] text-slate-400 leading-tight">
-                  {txType === 'Credit'
-                    ? `Give customer ${formatINR(numAmount)} cash. Customer transfers ${formatINR(numAmount + commission)} online to bank.`
-                    : `Transfer customer ${formatINR(numAmount)} online. Customer transfers ${formatINR(commission)} commission online to bank.`}
-                </span>
+                <span className="text-xs font-bold text-slate-100">3. Paid via Online Bank</span>
+                <span className="text-[9px] font-bold text-cyan-400 bg-cyan-400/10 px-2 py-0.5 rounded">Bank</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => confirmAndSubmitTransaction('udhar')}
+                className="w-full py-2.5 px-3.5 bg-red-950/40 hover:bg-red-900/50 border border-red-500/30 rounded-2xl flex justify-between items-center text-left transition-all"
+              >
+                <span className="text-xs font-bold text-red-200">4. Mark as UDHAR (Credit)</span>
+                <span className="text-[9px] font-bold text-red-400 bg-red-500/20 px-2 py-0.5 rounded">Udhar</span>
               </button>
             </div>
 
             <button
               type="button"
               onClick={() => setShowCommModal(false)}
-              className="w-full py-2.5 mt-1 bg-slate-800 hover:bg-slate-750 text-slate-300 font-bold text-xs rounded-xl active:scale-[0.98] transition-all border border-slate-700"
+              className="w-full py-2.5 mt-1 bg-slate-800 hover:bg-slate-750 text-slate-300 font-bold text-xs rounded-xl transition-all border border-slate-700"
             >
-              Cancel & Edit Form
+              Cancel
             </button>
           </div>
+        </div>
+      )}
+
+      {/* Denomination Note Calculator Modal */}
+      <DenominationModal
+        isOpen={showDenomModal}
+        onClose={() => setShowDenomModal(false)}
+        initialDenominations={quickDenoms}
+        onSave={(totalCash, denoms) => {
+          setQuickOpeningCash(String(totalCash));
+          setQuickDenoms(denoms);
+        }}
+        title="Opening Cash Denominations"
+      />
+
+      {/* Jama (Advance Deposit) Modal */}
+      {showJamaModal && (
+        <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-4">
+          <form onSubmit={handleJamaSubmit} className="bg-slate-900 border border-slate-800 rounded-3xl p-5 w-full max-w-sm flex flex-col gap-4 text-left shadow-2xl animate-in fade-in zoom-in-95 duration-150 select-none">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2">
+                <div className="p-2 bg-emerald-500/10 rounded-xl border border-emerald-500/20 text-emerald-400">
+                  <UserCheck className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-sm text-slate-100">Record JAMA (Advance)</h3>
+                  <p className="text-[10px] text-slate-400">Customer advance deposit for future services</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-1.5">
+              <label className="text-[10px] uppercase font-bold tracking-wider text-slate-400">
+                Customer Name *
+              </label>
+              <input
+                type="text"
+                required
+                placeholder="e.g. Ramesh Kumar"
+                value={jamaCustomerName}
+                onChange={(e) => setJamaCustomerName(e.target.value)}
+                className="w-full h-11 bg-slate-950 border border-slate-800 text-slate-100 rounded-xl px-3 text-xs font-bold focus:border-emerald-500 focus:outline-none"
+              />
+            </div>
+
+            <div className="flex flex-col gap-1.5">
+              <label className="text-[10px] uppercase font-bold tracking-wider text-slate-400">
+                Jama Deposit Amount (₹) *
+              </label>
+              <input
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]*"
+                required
+                placeholder="Enter Jama Amount"
+                value={jamaAmount}
+                onChange={(e) => setJamaAmount(e.target.value.replace(/[^0-9]/g, ''))}
+                className="w-full h-12 bg-slate-950 border border-slate-800 text-emerald-400 font-extrabold text-xl text-center rounded-xl px-3 focus:border-emerald-500 focus:outline-none"
+              />
+            </div>
+
+            <div className="flex flex-col gap-1.5">
+              <label className="text-[10px] uppercase font-bold tracking-wider text-slate-400">
+                Deposit Received Via
+              </label>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setJamaMethod('cash')}
+                  className={`py-2 px-3 rounded-xl border text-xs font-bold transition-all ${
+                    jamaMethod === 'cash'
+                      ? 'bg-emerald-500/20 border-emerald-400 text-emerald-300'
+                      : 'bg-slate-950 border-slate-800 text-slate-400'
+                  }`}
+                >
+                  Cash In Hand
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setJamaMethod('bank')}
+                  className={`py-2 px-3 rounded-xl border text-xs font-bold transition-all ${
+                    jamaMethod === 'bank'
+                      ? 'bg-emerald-500/20 border-emerald-400 text-emerald-300'
+                      : 'bg-slate-950 border-slate-800 text-slate-400'
+                  }`}
+                >
+                  Bank Deposit
+                </button>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowJamaModal(false)}
+                className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold transition-all"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={isSubmitting}
+                className="flex-1 py-2.5 bg-emerald-500 hover:bg-emerald-600 text-slate-950 rounded-xl text-xs font-extrabold transition-all shadow-md"
+              >
+                Save Jama
+              </button>
+            </div>
+          </form>
         </div>
       )}
     </div>
   );
 }
+

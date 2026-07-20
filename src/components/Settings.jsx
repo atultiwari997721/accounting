@@ -1,20 +1,24 @@
 import React, { useState, useEffect } from 'react';
-import { Settings as SettingsIcon, Play, Square, Download, Upload, ShieldAlert, RefreshCw, AlertCircle, Sparkles, RefreshCcw, Fingerprint } from 'lucide-react';
+import { Settings as SettingsIcon, Play, Square, Download, Upload, ShieldAlert, RefreshCw, AlertCircle, Sparkles, RefreshCcw, Fingerprint, Calculator } from 'lucide-react';
+import DenominationModal from './DenominationModal';
 
 export default function Settings({ 
   activeDay, 
-  backendUrl, 
-  isOfflineMode, 
   dayHistory = [], 
   transactions = [], 
   onOpenDay, 
   onCloseDay, 
   onReopenDay, 
   onReloadData, 
-  onResetPin 
+  onResetPin,
+  onAdjustCash
 }) {
   // 1. ALL STATE HOOKS (DECLARED UNCONDITIONALLY AT THE VERY TOP)
   const [openingCash, setOpeningCash] = useState('');
+  const [showDenomModal, setShowDenomModal] = useState(false);
+  const [openDenoms, setOpenDenoms] = useState({ n500: 0, n200: 0, n100: 0, n50: 0, n20: 0, n10: 0, coins: 0 });
+  const [showCloseDenomModal, setShowCloseDenomModal] = useState(false);
+  const [closeDenoms, setCloseDenoms] = useState({ n500: 0, n200: 0, n100: 0, n50: 0, n20: 0, n10: 0, coins: 0, c20: 0, c10: 0, c5: 0, c2: 0, c1: 0 });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [actionError, setActionError] = useState('');
   const [actionSuccess, setActionSuccess] = useState('');
@@ -22,7 +26,6 @@ export default function Settings({
   const [bioActive, setBioActive] = useState(false);
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
-  const [emailLoading, setEmailLoading] = useState(false);
   const [lastClosingCash, setLastClosingCash] = useState(0);
   const [notificationPermission, setNotificationPermission] = useState(
     typeof window !== 'undefined' && 'Notification' in window ? Notification.permission : 'default'
@@ -36,32 +39,17 @@ export default function Settings({
   }, []);
 
   useEffect(() => {
-    const fetchLastClosingCash = async () => {
-      if (isOfflineMode) {
-        const history = JSON.parse(localStorage.getItem('kiosk_day_history') || '[]');
-        if (history.length > 0) {
-          const closed = history.filter(d => d.status === 'Closed');
-          if (closed.length > 0) {
-            setLastClosingCash(closed[0].closingCash || closed[0].closing_cash || 0);
-          }
+    const fetchLastClosingCash = () => {
+      const history = JSON.parse(localStorage.getItem('kiosk_day_history') || '[]');
+      if (history.length > 0) {
+        const closed = history.filter(d => d.status === 'Closed');
+        if (closed.length > 0) {
+          setLastClosingCash(closed[0].closingCash || closed[0].closing_cash || 0);
         }
-        return;
-      }
-      try {
-        const res = await fetch(`${backendUrl}/api/day/history`);
-        const data = await res.json();
-        if (data.success && data.data && data.data.length > 0) {
-          const closed = data.data.filter(d => d.status === 'Closed');
-          if (closed.length > 0) {
-            setLastClosingCash(closed[0].closingCash || closed[0].closing_cash || 0);
-          }
-        }
-      } catch (err) {
-        console.warn('Failed to fetch day history for carry-forward.', err);
       }
     };
     fetchLastClosingCash();
-  }, [backendUrl, isOfflineMode, activeDay]);
+  }, [activeDay]);
 
   // 3. ALL HANDLERS AND HELPERS
   const toggleBiometrics = async () => {
@@ -135,6 +123,26 @@ export default function Settings({
 
   const handleReopen = async () => {
     if (!window.confirm("Wanna reopen the daily ledger for today? You can continue logging withdrawals/deposits.")) return;
+    
+    const pin = window.prompt("Please enter your PIN to reopen the ledger:");
+    if (!pin) return;
+    
+    try {
+      const encoder = new TextEncoder();
+      const data = encoder.encode(pin);
+      const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+      const hashArray = Array.from(new Uint8Array(hashBuffer));
+      const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+      
+      const storedHash = localStorage.getItem('kiosk_pin_hash');
+      if (storedHash && hashHex !== storedHash) {
+        alert("Incorrect PIN. Cannot reopen ledger.");
+        return;
+      }
+    } catch (e) {
+      console.error("PIN verification error", e);
+    }
+
     setActionError('');
     setActionSuccess('');
     setIsSubmitting(true);
@@ -162,7 +170,7 @@ export default function Settings({
 
     setIsSubmitting(true);
     const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
-    const res = await onOpenDay(today, Number(openingCash));
+    const res = await onOpenDay(today, Number(openingCash), openDenoms);
     if (res.success) {
       setActionSuccess(`Ledger session opened for ${today}!`);
       setOpeningCash('');
@@ -172,12 +180,26 @@ export default function Settings({
     setIsSubmitting(false);
   };
 
-  const handleCloseDay = async () => {
+  const handleCloseDay = () => {
     if (!window.confirm('Are you sure you want to CLOSE the ledger for today? You cannot record more transactions for today afterwards.')) return;
     
+    // Open denomination modal for closing cash
+    setShowCloseDenomModal(true);
+  };
+
+  const executeCloseDay = async (totalCash, denoms) => {
     setActionError('');
     setActionSuccess('');
     setIsSubmitting(true);
+    
+    if (onAdjustCash) {
+      const adjustRes = await onAdjustCash(totalCash, denoms);
+      if (!adjustRes.success) {
+        setActionError(adjustRes.error || 'Failed to adjust closing physical cash.');
+        setIsSubmitting(false);
+        return;
+      }
+    }
     
     const res = await onCloseDay();
     if (res.success) {
@@ -192,169 +214,143 @@ export default function Settings({
     setActionError('');
     setActionSuccess('');
 
-    let queryParams = '';
-    if (startDate && endDate) {
-      queryParams = `?startDate=${startDate}&endDate=${endDate}`;
-    }
+    try {
+      if (endpoint === 'export-csv') {
+        let txs = JSON.parse(localStorage.getItem('kiosk_transactions') || '[]');
+        
+        if (startDate) {
+          txs = txs.filter(t => t.timestamp.split('T')[0] >= startDate);
+        }
+        if (endDate) {
+          txs = txs.filter(t => t.timestamp.split('T')[0] <= endDate);
+        }
 
-    if (isOfflineMode) {
-      try {
-        if (endpoint === 'export-csv') {
-          let txs = JSON.parse(localStorage.getItem('kiosk_transactions') || '[]');
-          
-          if (startDate) {
-            txs = txs.filter(t => t.timestamp.split('T')[0] >= startDate);
-          }
-          if (endDate) {
-            txs = txs.filter(t => t.timestamp.split('T')[0] <= endDate);
-          }
+        const localAccs = JSON.parse(localStorage.getItem('kiosk_accounts') || '[]');
+        const dayHistoryLocal = JSON.parse(localStorage.getItem('kiosk_day_history') || '[]');
+        const activeLocal = JSON.parse(localStorage.getItem('kiosk_active_day') || 'null');
+        
+        const daySummariesList = [...dayHistoryLocal];
+        if (activeLocal) daySummariesList.push(activeLocal);
 
-          const localAccs = JSON.parse(localStorage.getItem('kiosk_accounts') || '[]');
-          const dayHistoryLocal = JSON.parse(localStorage.getItem('kiosk_day_history') || '[]');
-          const activeLocal = JSON.parse(localStorage.getItem('kiosk_active_day') || 'null');
-          
-          const daySummariesList = [...dayHistoryLocal];
-          if (activeLocal) daySummariesList.push(activeLocal);
+        // Group by date
+        const groups = {};
+        txs.forEach(tx => {
+          const dateStr = tx.timestamp.split('T')[0];
+          if (!groups[dateStr]) groups[dateStr] = [];
+          groups[dateStr].push(tx);
+        });
 
-          // Group by date
-          const groups = {};
-          txs.forEach(tx => {
-            const dateStr = tx.timestamp.split('T')[0];
-            if (!groups[dateStr]) groups[dateStr] = [];
-            groups[dateStr].push(tx);
-          });
+        const sortedDates = Object.keys(groups).sort();
 
-          const sortedDates = Object.keys(groups).sort();
+        let csv = 'Timestamp,Bank Account,Type,Customer Amount,Cash Out,Net Profit,Commission Mode,Customer Name,Bank Running Balance,Drawer Cash Balance\n';
 
-          let csv = 'Timestamp,Bank Account,Type,Customer Amount,Cash Out,Net Profit,Commission Mode,Customer Name,Bank Running Balance,Drawer Cash Balance\n';
-
-          for (const dateStr of sortedDates) {
-            const dayTxs = groups[dateStr];
-            const daySummary = daySummariesList.find(d => d.date === dateStr) || {
-              date: dateStr,
-              openingCash: 0,
-              closingCash: 0,
-              totalProfit: 0,
-              status: 'Closed',
-              bankBalances: {}
-            };
-
-            const dayClosingCash = Number(daySummary.closingCash || 0);
-            const dayOpeningCash = Number(daySummary.openingCash || 0);
-            const bankClosingMap = daySummary.bankBalances || {};
-
-            // Sort newest first to trace bank balance backwards
-            const txsDesc = [...dayTxs].sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp));
-
-            const runningBankMap = {};
-            localAccs.forEach(acc => {
-              if (daySummary.status === 'Open') {
-                runningBankMap[acc._id] = Number(acc.currentBalance || 0);
-              } else {
-                runningBankMap[acc._id] = bankClosingMap[acc.bankName] !== undefined
-                  ? Number(bankClosingMap[acc.bankName])
-                  : Number(acc.currentBalance || 0);
-              }
-            });
-
-            const mappedDesc = txsDesc.map(tx => {
-              const bankId = tx.bankAccountId?._id || tx.bankAccountId;
-              const currentVal = runningBankMap[bankId] !== undefined ? runningBankMap[bankId] : 0;
-              tx.runningBankBalAfter = currentVal;
-              runningBankMap[bankId] = currentVal - Number(tx.customerAmount || 0);
-              return tx;
-            });
-
-            // Sort oldest first to compute cash running balance forwards
-            const txsAsc = [...mappedDesc].sort((a,b) => new Date(a.timestamp) - new Date(b.timestamp));
-            let runningCash = dayOpeningCash;
-
-            const finalTxs = txsAsc.map(tx => {
-              runningCash = runningCash - Number(tx.cashOut || 0);
-              tx.runningCashAfter = runningCash;
-              return tx;
-            });
-
-            finalTxs.forEach(tx => {
-              const bankName = tx.bankAccountId?.bankName || 'Local Bank';
-              const timeStr = new Date(tx.timestamp).toLocaleString();
-              const comm = tx.commissionMode || 'Deducted';
-              const cust = tx.customerName || '';
-              csv += `"${timeStr}","${bankName.replace(/"/g, '""')}","${tx.type}",${tx.customerAmount},${tx.cashOut},${tx.profit},"${comm}","${cust.replace(/"/g, '""')}",${tx.runningBankBalAfter},${tx.runningCashAfter}\n`;
-            });
-
-            const bankSnapStr = Object.entries(bankClosingMap)
-              .map(([name, bal]) => `${name}: ₹${Number(bal).toLocaleString('en-IN')}`)
-              .join(' | ');
-
-            csv += `"=== EOD SUMMARY ===","Date: ${dateStr}","Total Tx: ${finalTxs.length}","Net Profit: ₹${Number(daySummary.totalProfit || 0).toLocaleString('en-IN')}","Drawer Cash: ₹${Number(dayClosingCash).toLocaleString('en-IN')}","Bank Snapshots: ${bankSnapStr || 'None'}","","","",""\n\n`;
-          }
-          
-          const blob = new Blob([csv], { type: 'text/csv' });
-          const url = window.URL.createObjectURL(blob);
-          const a = document.createElement('a');
-          a.href = url;
-          a.download = startDate && endDate ? `kiosk_transactions_${startDate}_to_${endDate}.csv` : 'kiosk_transactions_local.csv';
-          document.body.appendChild(a);
-          a.click();
-          window.URL.revokeObjectURL(url);
-          document.body.removeChild(a);
-          setActionSuccess('CSV downloaded successfully (Local)!');
-        } else {
-          // bin backup
-          const accounts = JSON.parse(localStorage.getItem('kiosk_accounts') || '[]');
-          let transactions = JSON.parse(localStorage.getItem('kiosk_transactions') || '[]');
-          const daySummaries = JSON.parse(localStorage.getItem('kiosk_day_history') || '[]');
-          const active = JSON.parse(localStorage.getItem('kiosk_active_day') || 'null');
-          if (active) daySummaries.push(active);
-
-          if (startDate) {
-            transactions = transactions.filter(t => t.timestamp.split('T')[0] >= startDate);
-          }
-          if (endDate) {
-            transactions = transactions.filter(t => t.timestamp.split('T')[0] <= endDate);
-          }
-
-          const backupData = {
-            accounts,
-            transactions,
-            daySummaries,
-            exportedAt: new Date().toISOString(),
-            isLocalBackup: true
+        for (const dateStr of sortedDates) {
+          const dayTxs = groups[dateStr];
+          const daySummary = daySummariesList.find(d => d.date === dateStr) || {
+            date: dateStr,
+            openingCash: 0,
+            closingCash: 0,
+            totalProfit: 0,
+            status: 'Closed',
+            bankBalances: {}
           };
 
-          const text = btoa(unescape(encodeURIComponent(JSON.stringify(backupData))));
-          const blob = new Blob([text], { type: 'application/octet-stream' });
-          const url = window.URL.createObjectURL(blob);
-          const a = document.createElement('a');
-          a.href = url;
-          a.download = startDate && endDate ? `kiosk_backup_${startDate}_to_${endDate}.bin` : 'kiosk_backup_local.bin';
-          document.body.appendChild(a);
-          a.click();
-          window.URL.revokeObjectURL(url);
-          document.body.removeChild(a);
-          setActionSuccess('Encrypted backup downloaded successfully (Local)!');
-        }
-      } catch (err) {
-        setActionError(`Local export failed: ${err.message}`);
-      }
-      return;
-    }
+          const dayClosingCash = Number(daySummary.closingCash || 0);
+          const dayOpeningCash = Number(daySummary.openingCash || 0);
+          const bankClosingMap = daySummary.bankBalances || {};
 
-    try {
-      const response = await fetch(`${backendUrl}/api/backup/${endpoint}${queryParams}`);
-      if (!response.ok) throw new Error('Failed to retrieve backup file.');
-      
-      const blob = await response.blob();
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = startDate && endDate ? `kiosk_${endpoint}_${startDate}_to_${endDate}.${defaultFilename.split('.')[1]}` : defaultFilename;
-      document.body.appendChild(a);
-      a.click();
-      window.URL.revokeObjectURL(url);
-      document.body.removeChild(a);
-      setActionSuccess(`${defaultFilename} download initiated successfully!`);
+          // Sort newest first to trace bank balance backwards
+          const txsDesc = [...dayTxs].sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp));
+
+          const runningBankMap = {};
+          localAccs.forEach(acc => {
+            if (daySummary.status === 'Open') {
+              runningBankMap[acc._id] = Number(acc.currentBalance || 0);
+            } else {
+              runningBankMap[acc._id] = bankClosingMap[acc.bankName] !== undefined
+                ? Number(bankClosingMap[acc.bankName])
+                : Number(acc.currentBalance || 0);
+            }
+          });
+
+          const mappedDesc = txsDesc.map(tx => {
+            const bankId = tx.bankAccountId?._id || tx.bankAccountId;
+            const currentVal = runningBankMap[bankId] !== undefined ? runningBankMap[bankId] : 0;
+            tx.runningBankBalAfter = currentVal;
+            runningBankMap[bankId] = currentVal - Number(tx.customerAmount || 0);
+            return tx;
+          });
+
+          // Sort oldest first to compute cash running balance forwards
+          const txsAsc = [...mappedDesc].sort((a,b) => new Date(a.timestamp) - new Date(b.timestamp));
+          let runningCash = dayOpeningCash;
+
+          const finalTxs = txsAsc.map(tx => {
+            runningCash = runningCash - Number(tx.cashOut || 0);
+            tx.runningCashAfter = runningCash;
+            return tx;
+          });
+
+          finalTxs.forEach(tx => {
+            const bankName = tx.bankAccountId?.bankName || 'Local Bank';
+            const timeStr = new Date(tx.timestamp).toLocaleString();
+            const comm = tx.commissionMode || 'Deducted';
+            const cust = tx.customerName || '';
+            csv += `"${timeStr}","${bankName.replace(/"/g, '""')}","${tx.type}",${tx.customerAmount},${tx.cashOut},${tx.profit},"${comm}","${cust.replace(/"/g, '""')}",${tx.runningBankBalAfter},${tx.runningCashAfter}\n`;
+          });
+
+          const bankSnapStr = Object.entries(bankClosingMap)
+            .map(([name, bal]) => `${name}: ₹${Number(bal).toLocaleString('en-IN')}`)
+            .join(' | ');
+
+          csv += `"=== EOD SUMMARY ===","Date: ${dateStr}","Total Tx: ${finalTxs.length}","Net Profit: ₹${Number(daySummary.totalProfit || 0).toLocaleString('en-IN')}","Drawer Cash: ₹${Number(dayClosingCash).toLocaleString('en-IN')}","Bank Snapshots: ${bankSnapStr || 'None'}","","","",""\n\n`;
+        }
+        
+        const blob = new Blob([csv], { type: 'text/csv' });
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = startDate && endDate ? `kiosk_transactions_${startDate}_to_${endDate}.csv` : 'kiosk_transactions_local.csv';
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+        setActionSuccess('CSV downloaded successfully!');
+      } else {
+        // bin backup
+        const accounts = JSON.parse(localStorage.getItem('kiosk_accounts') || '[]');
+        let transactions = JSON.parse(localStorage.getItem('kiosk_transactions') || '[]');
+        const daySummaries = JSON.parse(localStorage.getItem('kiosk_day_history') || '[]');
+        const active = JSON.parse(localStorage.getItem('kiosk_active_day') || 'null');
+        if (active) daySummaries.push(active);
+
+        if (startDate) {
+          transactions = transactions.filter(t => t.timestamp.split('T')[0] >= startDate);
+        }
+        if (endDate) {
+          transactions = transactions.filter(t => t.timestamp.split('T')[0] <= endDate);
+        }
+
+        const backupData = {
+          accounts,
+          transactions,
+          daySummaries,
+          exportedAt: new Date().toISOString(),
+          isLocalBackup: true
+        };
+
+        const text = btoa(unescape(encodeURIComponent(JSON.stringify(backupData))));
+        const blob = new Blob([text], { type: 'application/octet-stream' });
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = startDate && endDate ? `kiosk_backup_${startDate}_to_${endDate}.bin` : 'kiosk_backup_local.bin';
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+        setActionSuccess('Encrypted backup downloaded successfully!');
+      }
     } catch (err) {
       setActionError(`Export failed: ${err.message}`);
     }
@@ -368,76 +364,42 @@ export default function Settings({
     setActionSuccess('');
     setImporting(true);
 
-    if (isOfflineMode) {
-      try {
-        const reader = new FileReader();
-        reader.onload = async (evt) => {
-          try {
-            const encryptedData = evt.target?.result;
-            if (typeof encryptedData !== 'string') throw new Error('Could not read file.');
-
-            // Decode from base64 representation
-            const decrypted = decodeURIComponent(escape(atob(encryptedData)));
-            const data = JSON.parse(decrypted);
-
-            if (!data.accounts || !data.transactions || !data.daySummaries) {
-              throw new Error('Invalid backup structure.');
-            }
-
-            localStorage.setItem('kiosk_accounts', JSON.stringify(data.accounts));
-            localStorage.setItem('kiosk_transactions', JSON.stringify(data.transactions));
-            
-            // Find active day and history list
-            const active = data.daySummaries.find(d => d.status === 'Open') || null;
-            const history = data.daySummaries.filter(d => d.status === 'Closed');
-            
-            localStorage.setItem('kiosk_active_day', JSON.stringify(active));
-            localStorage.setItem('kiosk_day_history', JSON.stringify(history));
-
-            setActionSuccess('Database restored successfully (Local)!');
-            onReloadData();
-          } catch (err) {
-            setActionError(`Import failed: ${err.message}`);
-          } finally {
-            setImporting(false);
-          }
-        };
-        reader.readAsText(file);
-      } catch (err) {
-        setActionError(`Import reading error: ${err.message}`);
-        setImporting(false);
-      }
-      return;
-    }
-
     try {
       const reader = new FileReader();
       reader.onload = async (evt) => {
         try {
           const encryptedData = evt.target?.result;
-          if (typeof encryptedData !== 'string') throw new Error('Could not parse file content.');
+          if (typeof encryptedData !== 'string') throw new Error('Could not read file.');
 
-          const res = await fetch(`${backendUrl}/api/backup/import`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ encryptedData })
-          });
-          const data = await res.json();
-          if (data.success) {
-            setActionSuccess(data.message || 'Database restored successfully!');
-            onReloadData();
-          } else {
-            setActionError(data.error || 'Import failed. Check key settings.');
+          // Decode from base64 representation
+          const decrypted = decodeURIComponent(escape(atob(encryptedData)));
+          const data = JSON.parse(decrypted);
+
+          if (!data.accounts || !data.transactions || !data.daySummaries) {
+            throw new Error('Invalid backup structure.');
           }
+
+          localStorage.setItem('kiosk_accounts', JSON.stringify(data.accounts));
+          localStorage.setItem('kiosk_transactions', JSON.stringify(data.transactions));
+          
+          // Find active day and history list
+          const active = data.daySummaries.find(d => d.status === 'Open') || null;
+          const history = data.daySummaries.filter(d => d.status === 'Closed');
+          
+          localStorage.setItem('kiosk_active_day', JSON.stringify(active));
+          localStorage.setItem('kiosk_day_history', JSON.stringify(history));
+
+          setActionSuccess('Database restored successfully!');
+          onReloadData();
         } catch (err) {
-          setActionError(`Import reading error: ${err.message}`);
+          setActionError(`Import failed: ${err.message}`);
         } finally {
           setImporting(false);
         }
       };
       reader.readAsText(file);
     } catch (err) {
-      setActionError(`File selector error: ${err.message}`);
+      setActionError(`Import reading error: ${err.message}`);
       setImporting(false);
     }
   };
@@ -449,46 +411,26 @@ export default function Settings({
     setActionSuccess('');
     setIsSubmitting(true);
 
-    if (isOfflineMode) {
-      try {
-        const accs = JSON.parse(localStorage.getItem('kiosk_accounts') || '[]');
-        const banks = ['SBI Main Account', 'ICICI Business', 'HDFC Ledger'];
-        
-        banks.forEach(bankName => {
-          const exists = accs.find(a => a.bankName.toLowerCase() === bankName.toLowerCase());
-          if (!exists) {
-            accs.push({
-              _id: 'local_' + Math.random().toString(36).substr(2, 9),
-              bankName,
-              currentBalance: Math.floor(Math.random() * 80000) + 20000,
-              createdAt: new Date().toISOString()
-            });
-          }
-        });
-        localStorage.setItem('kiosk_accounts', JSON.stringify(accs));
-        setActionSuccess('Demo accounts seeded locally! Open the day ledger to start.');
-        onReloadData();
-      } catch (err) {
-        setActionError('Failed to seed local accounts.');
-      } finally {
-        setIsSubmitting(false);
-      }
-      return;
-    }
-    
     try {
+      const accs = JSON.parse(localStorage.getItem('kiosk_accounts') || '[]');
       const banks = ['SBI Main Account', 'ICICI Business', 'HDFC Ledger'];
-      for (const bankName of banks) {
-        await fetch(`${backendUrl}/api/accounts`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ bankName, currentBalance: Math.floor(Math.random() * 80000) + 20000 })
-        });
-      }
-      setActionSuccess('Demo accounts seeded! Add a transaction or open the day ledger.');
+      
+      banks.forEach(bankName => {
+        const exists = accs.find(a => a.bankName.toLowerCase() === bankName.toLowerCase());
+        if (!exists) {
+          accs.push({
+            _id: 'local_' + Math.random().toString(36).substr(2, 9),
+            bankName,
+            currentBalance: Math.floor(Math.random() * 80000) + 20000,
+            createdAt: new Date().toISOString()
+          });
+        }
+      });
+      localStorage.setItem('kiosk_accounts', JSON.stringify(accs));
+      setActionSuccess('Demo accounts seeded locally! Open the day ledger to start.');
       onReloadData();
     } catch (err) {
-      setActionError('Failed to seed demo accounts.');
+      setActionError('Failed to seed local accounts.');
     } finally {
       setIsSubmitting(false);
     }
@@ -497,43 +439,6 @@ export default function Settings({
   const handleResetPin = () => {
     if (window.confirm('Wipe passcode? You will be asked to configure a new 4-digit PIN instantly.')) {
       onResetPin();
-    }
-  };
-
-  const handleEmailBackup = async () => {
-    setActionError('');
-    setActionSuccess('');
-    if (isOfflineMode) {
-      setActionError('Cannot trigger email backup in Local Mode. Check your backend connection.');
-      return;
-    }
-    
-    setEmailLoading(true);
-    try {
-      let res;
-      if (startDate && endDate) {
-        res = await fetch(`${backendUrl}/api/backup/email-range`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ startDate, endDate })
-        });
-      } else {
-        res = await fetch(`${backendUrl}/api/backup/email-today`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' }
-        });
-      }
-      
-      const data = await res.json();
-      if (data.success) {
-        setActionSuccess(data.message || 'Backup files successfully sent to your email inbox!');
-      } else {
-        setActionError(data.error || 'Failed to email backup files.');
-      }
-    } catch (err) {
-      setActionError('Network error. Check SMTP settings on backend.');
-    } finally {
-      setEmailLoading(false);
     }
   };
 
@@ -671,16 +576,34 @@ _Sent from Kiosk Ledger PWA_`;
 
             <form onSubmit={handleOpenDay} className="flex flex-col gap-3">
               <div className="flex flex-col gap-1.5 text-left">
-                <label className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Open New Session / Ledger</label>
-                <input
-                  type="text"
-                  inputMode="numeric"
-                  pattern="[0-9]*"
-                  placeholder="Opening Cash (₹)"
-                  value={openingCash}
-                  onChange={(e) => setOpeningCash(e.target.value.replace(/[^0-9]/g, ''))}
-                  className="w-full h-10 px-3 text-xs bg-slate-955 bg-slate-950 border border-slate-800 focus:border-amber-500 focus:outline-none rounded-xl text-slate-100 font-bold"
-                />
+                <div className="flex justify-between items-center">
+                  <label className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Open New Session / Ledger</label>
+                  <button
+                    type="button"
+                    onClick={() => setShowDenomModal(true)}
+                    className="text-[10px] font-bold text-amber-400 hover:text-amber-300 flex items-center gap-1"
+                  >
+                    <Calculator className="w-3 h-3" /> Note Counter
+                  </button>
+                </div>
+                <div className="flex gap-2 items-center">
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    placeholder="Opening Cash (₹)"
+                    value={openingCash}
+                    onChange={(e) => setOpeningCash(e.target.value.replace(/[^0-9]/g, ''))}
+                    className="flex-1 h-10 px-3 text-xs bg-slate-950 border border-slate-800 focus:border-amber-500 focus:outline-none rounded-xl text-slate-100 font-bold"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowDenomModal(true)}
+                    className="h-10 px-3 bg-slate-800 hover:bg-slate-700 text-amber-400 border border-slate-700 text-xs font-bold rounded-xl flex items-center gap-1 transition-all shrink-0"
+                  >
+                    <Calculator className="w-3.5 h-3.5" /> Count Notes
+                  </button>
+                </div>
                 {lastClosingCash > 0 && (
                   <button
                     type="button"
@@ -699,6 +622,28 @@ _Sent from Kiosk Ledger PWA_`;
                 <Play className="w-4 h-4 fill-current" /> Open Daily Ledger
               </button>
             </form>
+
+            <DenominationModal
+              isOpen={showDenomModal}
+              onClose={() => setShowDenomModal(false)}
+              initialDenominations={openDenoms}
+              onSave={(totalCash, denoms) => {
+                setOpeningCash(String(totalCash));
+                setOpenDenoms(denoms);
+              }}
+              title="Opening Physical Cash Notes"
+            />
+            
+            <DenominationModal
+              isOpen={showCloseDenomModal}
+              onClose={() => setShowCloseDenomModal(false)}
+              initialDenominations={closeDenoms}
+              onSave={(totalCash, denoms) => {
+                setCloseDenoms(denoms);
+                executeCloseDay(totalCash, denoms);
+              }}
+              title="Closing Physical Cash Notes"
+            />
           </div>
         )}
       </div>
@@ -760,19 +705,6 @@ _Sent from Kiosk Ledger PWA_`;
             <Download className="w-4 h-4 text-amber-400" /> Download Encrypted Bin Backup
           </button>
 
-          {/* Email Trigger Button */}
-          <button
-            type="button"
-            onClick={handleEmailBackup}
-            disabled={emailLoading}
-            className="w-full h-10 bg-slate-800 border border-slate-700 text-slate-200 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 hover:bg-slate-750 active:scale-95 transition-all disabled:opacity-50"
-          >
-            {emailLoading ? (
-              <div className="w-4 h-4 border-2 border-slate-305 border-t-transparent rounded-full animate-spin"></div>
-            ) : (
-              'Email Backup Statement'
-            )}
-          </button>
         </div>
       </div>
 
