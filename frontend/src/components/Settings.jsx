@@ -13,19 +13,57 @@ export default function Settings({
   onReloadData, 
   onResetPin 
 }) {
+  // 1. ALL STATE HOOKS (DECLARED UNCONDITIONALLY AT THE VERY TOP)
   const [openingCash, setOpeningCash] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [actionError, setActionError] = useState('');
   const [actionSuccess, setActionSuccess] = useState('');
   const [importing, setImporting] = useState(false);
   const [bioActive, setBioActive] = useState(false);
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
+  const [emailLoading, setEmailLoading] = useState(false);
+  const [lastClosingCash, setLastClosingCash] = useState(0);
+  const [notificationPermission, setNotificationPermission] = useState(
+    typeof window !== 'undefined' && 'Notification' in window ? Notification.permission : 'default'
+  );
 
+  // 2. ALL EFFECT HOOKS
   useEffect(() => {
     const ownerId = localStorage.getItem('kiosk_owner_userid') || 'admin';
     const isReg = localStorage.getItem(`kiosk_biometrics_registered_${ownerId}`) === 'true';
     setBioActive(isReg);
   }, []);
 
+  useEffect(() => {
+    const fetchLastClosingCash = async () => {
+      if (isOfflineMode) {
+        const history = JSON.parse(localStorage.getItem('kiosk_day_history') || '[]');
+        if (history.length > 0) {
+          const closed = history.filter(d => d.status === 'Closed');
+          if (closed.length > 0) {
+            setLastClosingCash(closed[0].closingCash || closed[0].closing_cash || 0);
+          }
+        }
+        return;
+      }
+      try {
+        const res = await fetch(`${backendUrl}/api/day/history`);
+        const data = await res.json();
+        if (data.success && data.data && data.data.length > 0) {
+          const closed = data.data.filter(d => d.status === 'Closed');
+          if (closed.length > 0) {
+            setLastClosingCash(closed[0].closingCash || closed[0].closing_cash || 0);
+          }
+        }
+      } catch (err) {
+        console.warn('Failed to fetch day history for carry-forward.', err);
+      }
+    };
+    fetchLastClosingCash();
+  }, [backendUrl, isOfflineMode, activeDay]);
+
+  // 3. ALL HANDLERS AND HELPERS
   const toggleBiometrics = async () => {
     setActionError('');
     setActionSuccess('');
@@ -76,10 +114,6 @@ export default function Settings({
     }
   };
 
-  const [notificationPermission, setNotificationPermission] = useState(
-    typeof window !== 'undefined' && 'Notification' in window ? Notification.permission : 'default'
-  );
-
   const requestNotificationPermission = async () => {
     if (typeof window !== 'undefined' && 'Notification' in window) {
       const permission = await Notification.requestPermission();
@@ -113,38 +147,6 @@ export default function Settings({
     }
     setIsSubmitting(false);
   };
-  const [startDate, setStartDate] = useState('');
-  const [endDate, setEndDate] = useState('');
-  const [emailLoading, setEmailLoading] = useState(false);
-  const [lastClosingCash, setLastClosingCash] = useState(0);
-
-  useEffect(() => {
-    const fetchLastClosingCash = async () => {
-      if (isOfflineMode) {
-        const history = JSON.parse(localStorage.getItem('kiosk_day_history') || '[]');
-        if (history.length > 0) {
-          const closed = history.filter(d => d.status === 'Closed');
-          if (closed.length > 0) {
-            setLastClosingCash(closed[0].closingCash || 0);
-          }
-        }
-        return;
-      }
-      try {
-        const res = await fetch(`${backendUrl}/api/day/history`);
-        const data = await res.json();
-        if (data.success && data.data && data.data.length > 0) {
-          const closed = data.data.filter(d => d.status === 'Closed');
-          if (closed.length > 0) {
-            setLastClosingCash(closed[0].closingCash || 0);
-          }
-        }
-      } catch (err) {
-        console.warn('Failed to fetch day history for carry-forward.', err);
-      }
-    };
-    fetchLastClosingCash();
-  }, [backendUrl, isOfflineMode, activeDay]);
 
   const formatINR = (val) => '₹' + Number(val || 0).toLocaleString('en-IN');
 
