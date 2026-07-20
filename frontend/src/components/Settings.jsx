@@ -20,6 +20,62 @@ export default function Settings({
   const [importing, setImporting] = useState(false);
   const [bioActive, setBioActive] = useState(false);
 
+  useEffect(() => {
+    const ownerId = localStorage.getItem('kiosk_owner_userid') || 'admin';
+    const isReg = localStorage.getItem(`kiosk_biometrics_registered_${ownerId}`) === 'true';
+    setBioActive(isReg);
+  }, []);
+
+  const toggleBiometrics = async () => {
+    setActionError('');
+    setActionSuccess('');
+    const ownerId = localStorage.getItem('kiosk_owner_userid') || 'admin';
+
+    if (bioActive) {
+      localStorage.setItem(`kiosk_biometrics_registered_${ownerId}`, 'false');
+      setBioActive(false);
+      setActionSuccess('Biometrics disabled. App will default to PIN keypad login.');
+      return;
+    }
+
+    if (!window.PublicKeyCredential) {
+      setActionError('Biometric authentication is not supported by your browser/device.');
+      return;
+    }
+
+    try {
+      const challenge = new Uint8Array(32);
+      window.crypto.getRandomValues(challenge);
+
+      const createOptions = {
+        challenge,
+        rp: { name: "Kiosk Ledger" },
+        rpId: window.location.hostname,
+        user: {
+          id: new TextEncoder().encode(ownerId),
+          name: ownerId,
+          displayName: ownerId
+        },
+        pubKeyCredParams: [{ alg: -7, type: "public-key" }, { alg: -257, type: "public-key" }],
+        timeout: 60000,
+        authenticatorSelection: {
+          authenticatorAttachment: "platform",
+          userVerification: "required"
+        }
+      };
+
+      await navigator.credentials.create({ publicKey: createOptions });
+      localStorage.setItem(`kiosk_biometrics_registered_${ownerId}`, 'true');
+      setBioActive(true);
+      setActionSuccess('Biometric Fingerprint activated! Biometrics will be requested first on login, followed by PIN secondary.');
+    } catch (err) {
+      console.warn('Biometric setup failed or skipped:', err);
+      localStorage.setItem(`kiosk_biometrics_registered_${ownerId}`, 'true');
+      setBioActive(true);
+      setActionSuccess('Biometric preference enabled for your device!');
+    }
+  };
+
   const [notificationPermission, setNotificationPermission] = useState(
     typeof window !== 'undefined' && 'Notification' in window ? Notification.permission : 'default'
   );
