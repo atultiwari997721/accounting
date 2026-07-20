@@ -416,28 +416,28 @@ export default function PinLock({ onUnlock }) {
           {/* Method tabs selector */}
           <div className="flex gap-1 p-1 bg-slate-950 rounded-xl border border-slate-900 w-full mb-1">
             <button
-              onClick={() => { setAuthMethod('pin'); handleClear(); setErrorMsg(''); }}
+              onClick={() => { setAuthMethod('fingerprint'); setErrorMsg(''); handleVerifyBiometrics(); }}
               className={`flex-1 h-8 rounded-lg text-[10px] font-bold transition-all flex items-center justify-center gap-1 ${
-                authMethod === 'pin' ? 'bg-amber-400 text-slate-950' : 'text-slate-400 hover:text-slate-200'
+                authMethod === 'fingerprint' ? 'bg-amber-400 text-slate-950 shadow-md' : 'text-slate-400 hover:text-slate-200'
               }`}
             >
-              <Keyboard className="w-3.5 h-3.5" /> PIN Keypad
+              <Fingerprint className="w-3.5 h-3.5" /> Fingerprint (Primary)
+            </button>
+            <button
+              onClick={() => { setAuthMethod('pin'); handleClear(); setErrorMsg(''); }}
+              className={`flex-1 h-8 rounded-lg text-[10px] font-bold transition-all flex items-center justify-center gap-1 ${
+                authMethod === 'pin' ? 'bg-amber-400 text-slate-950 shadow-md' : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <Keyboard className="w-3.5 h-3.5" /> PIN Keypad (Secondary)
             </button>
             <button
               onClick={() => { setAuthMethod('password'); setErrorMsg(''); }}
               className={`flex-1 h-8 rounded-lg text-[10px] font-bold transition-all flex items-center justify-center gap-1 ${
-                authMethod === 'password' ? 'bg-amber-400 text-slate-950' : 'text-slate-400 hover:text-slate-200'
+                authMethod === 'password' ? 'bg-amber-400 text-slate-950 shadow-md' : 'text-slate-400 hover:text-slate-200'
               }`}
             >
               <Key className="w-3.5 h-3.5" /> Password
-            </button>
-            <button
-              onClick={() => { setAuthMethod('fingerprint'); setErrorMsg(''); handleVerifyBiometrics(); }}
-              className={`flex-1 h-8 rounded-lg text-[10px] font-bold transition-all flex items-center justify-center gap-1 ${
-                authMethod === 'fingerprint' ? 'bg-amber-400 text-slate-950' : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              <Fingerprint className="w-3.5 h-3.5" /> Fingerprint
             </button>
           </div>
 

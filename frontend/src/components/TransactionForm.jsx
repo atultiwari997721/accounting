@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Landmark, ArrowRightLeft, DollarSign, Wallet, Percent, CheckCircle2, AlertTriangle, TrendingUp, TrendingDown } from 'lucide-react';
+import { Landmark, ArrowRightLeft, DollarSign, Wallet, Percent, CheckCircle2, AlertTriangle, TrendingUp, TrendingDown, HelpCircle } from 'lucide-react';
 
 export default function TransactionForm({ activeDay, accounts, onSubmitTransaction, onNavigateToAccounts, onOpenDay }) {
   const [amount, setAmount] = useState('');
@@ -494,50 +494,74 @@ export default function TransactionForm({ activeDay, accounts, onSubmitTransacti
       )}
 
       {showCommModal && (
-        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-4">
           <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 w-full max-w-sm flex flex-col gap-4 text-center shadow-2xl animate-in fade-in zoom-in-95 duration-150">
             <div className="mx-auto p-3 bg-amber-500/10 rounded-full border border-amber-500/20 w-fit">
-              <Percent className="w-6 h-6 text-amber-400" />
+              <HelpCircle className="w-6 h-6 text-amber-400" />
             </div>
             
             <div>
-              <h3 className="text-sm font-bold text-slate-100 uppercase tracking-wide">Confirm Commission Mode</h3>
+              <h3 className="text-sm font-bold text-slate-100 uppercase tracking-wide">Select Commission Payment</h3>
               <p className="text-[11px] text-slate-400 mt-1.5 leading-relaxed">
-                For the {txType === 'Credit' ? 'Withdrawal' : 'Deposit'} of <span className="text-slate-200 font-bold">{formatINR(numAmount)}</span>, how did the customer pay the <span className="text-emerald-400 font-bold">1% Commission ({formatINR(commission)})</span>?
+                For this <span className="text-slate-200 font-bold">{formatINR(numAmount)}</span> {txType === 'Credit' ? 'Withdrawal' : 'Deposit'}, choose how the customer is paying the <span className="text-emerald-400 font-bold">1% Commission ({formatINR(commission)})</span>:
               </p>
             </div>
 
-            <div className="flex flex-col gap-2.5 mt-2">
+            <div className="flex flex-col gap-2.5 mt-1">
+              {/* Option 1: Cut from Amount */}
               <button
                 type="button"
                 onClick={() => confirmAndSubmitTransaction('deducted')}
-                className="w-full py-3 px-4 bg-slate-950 hover:bg-slate-850 border border-slate-850 rounded-xl flex flex-col items-start gap-0.5 text-left active:scale-[0.98] transition-all"
+                className="w-full py-3 px-3.5 bg-slate-950 hover:bg-slate-850 border border-slate-800 hover:border-amber-500/50 rounded-2xl flex flex-col items-start gap-1 text-left active:scale-[0.98] transition-all group"
               >
-                <span className="text-xs font-bold text-slate-200">1. Deducted from Payout</span>
-                <span className="text-[9px] text-slate-500 font-medium">
-                  {txType === 'Credit' ? `You give ₹${(numAmount - commission).toLocaleString('en-IN')} cash | Bank gets +₹${numAmount.toLocaleString('en-IN')}` : `You transfer ₹${(numAmount - commission).toLocaleString('en-IN')} | Cash in +₹${numAmount.toLocaleString('en-IN')}`}
+                <div className="flex justify-between items-center w-full">
+                  <span className="text-xs font-bold text-slate-100 group-hover:text-amber-300">
+                    1. Cut from {formatINR(numAmount)}
+                  </span>
+                  <span className="text-[9px] font-bold text-amber-400/80 bg-amber-400/10 px-2 py-0.5 rounded-md">Cut Payout</span>
+                </div>
+                <span className="text-[9.5px] text-slate-400 leading-tight">
+                  {txType === 'Credit'
+                    ? `Give customer ${formatINR(numAmount - commission)} cash (Cut ${formatINR(commission)}). Bank credited ${formatINR(numAmount)}.`
+                    : `Transfer customer ${formatINR(numAmount - commission)} online. Customer gives ${formatINR(numAmount)} cash.`}
                 </span>
               </button>
 
+              {/* Option 2: Give Extra Cash */}
               <button
                 type="button"
                 onClick={() => confirmAndSubmitTransaction('cash')}
-                className="w-full py-3 px-4 bg-slate-950 hover:bg-slate-850 border border-slate-850 rounded-xl flex flex-col items-start gap-0.5 text-left active:scale-[0.98] transition-all"
+                className="w-full py-3 px-3.5 bg-slate-950 hover:bg-slate-850 border border-slate-800 hover:border-emerald-500/50 rounded-2xl flex flex-col items-start gap-1 text-left active:scale-[0.98] transition-all group"
               >
-                <span className="text-xs font-bold text-slate-200">2. Paid in Extra Cash</span>
-                <span className="text-[9px] text-slate-500 font-medium">
-                  {txType === 'Credit' ? `You give ₹${numAmount.toLocaleString('en-IN')} cash | Customer pays ₹${commission} extra cash` : `You transfer ₹${numAmount.toLocaleString('en-IN')} | Customer pays ₹${(numAmount + commission).toLocaleString('en-IN')} cash`}
+                <div className="flex justify-between items-center w-full">
+                  <span className="text-xs font-bold text-slate-100 group-hover:text-emerald-300">
+                    2. Customer Gives Extra {formatINR(commission)} Cash
+                  </span>
+                  <span className="text-[9px] font-bold text-emerald-400/80 bg-emerald-400/10 px-2 py-0.5 rounded-md">Extra Cash</span>
+                </div>
+                <span className="text-[9.5px] text-slate-400 leading-tight">
+                  {txType === 'Credit'
+                    ? `Give customer full ${formatINR(numAmount)} cash. Customer hands you ${formatINR(commission)} extra cash in hand.`
+                    : `Transfer customer ${formatINR(numAmount)} online. Customer hands you ${formatINR(numAmount + commission)} cash.`}
                 </span>
               </button>
 
+              {/* Option 3: Pay Online on Account */}
               <button
                 type="button"
                 onClick={() => confirmAndSubmitTransaction('bank')}
-                className="w-full py-3 px-4 bg-slate-950 hover:bg-slate-850 border border-slate-850 rounded-xl flex flex-col items-start gap-0.5 text-left active:scale-[0.98] transition-all"
+                className="w-full py-3 px-3.5 bg-slate-950 hover:bg-slate-850 border border-slate-800 hover:border-cyan-500/50 rounded-2xl flex flex-col items-start gap-1 text-left active:scale-[0.98] transition-all group"
               >
-                <span className="text-xs font-bold text-slate-200">3. Paid Extra Online (Bank)</span>
-                <span className="text-[9px] text-slate-500 font-medium">
-                  {txType === 'Credit' ? `You give ₹${numAmount.toLocaleString('en-IN')} cash | Bank gets +₹${(numAmount + commission).toLocaleString('en-IN')}` : `You transfer ₹${numAmount.toLocaleString('en-IN')} | Bank gets +₹${commission}`}
+                <div className="flex justify-between items-center w-full">
+                  <span className="text-xs font-bold text-slate-100 group-hover:text-cyan-300">
+                    3. Customer Pays Online to Account
+                  </span>
+                  <span className="text-[9px] font-bold text-cyan-400/80 bg-cyan-400/10 px-2 py-0.5 rounded-md">Extra Online</span>
+                </div>
+                <span className="text-[9.5px] text-slate-400 leading-tight">
+                  {txType === 'Credit'
+                    ? `Give customer ${formatINR(numAmount)} cash. Customer transfers ${formatINR(numAmount + commission)} online to bank.`
+                    : `Transfer customer ${formatINR(numAmount)} online. Customer transfers ${formatINR(commission)} commission online to bank.`}
                 </span>
               </button>
             </div>
@@ -545,7 +569,7 @@ export default function TransactionForm({ activeDay, accounts, onSubmitTransacti
             <button
               type="button"
               onClick={() => setShowCommModal(false)}
-              className="w-full py-2.5 mt-2 bg-slate-800 hover:bg-slate-750 text-slate-300 font-bold text-xs rounded-xl active:scale-[0.98] transition-all border border-slate-700"
+              className="w-full py-2.5 mt-1 bg-slate-800 hover:bg-slate-750 text-slate-300 font-bold text-xs rounded-xl active:scale-[0.98] transition-all border border-slate-700"
             >
               Cancel & Edit Form
             </button>

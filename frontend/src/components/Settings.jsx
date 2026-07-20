@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Settings as SettingsIcon, Play, Square, Download, Upload, ShieldAlert, RefreshCw, AlertCircle, Sparkles, RefreshCcw } from 'lucide-react';
+import { Settings as SettingsIcon, Play, Square, Download, Upload, ShieldAlert, RefreshCw, AlertCircle, Sparkles, RefreshCcw, Fingerprint } from 'lucide-react';
 
 export default function Settings({ 
   activeDay, 
@@ -18,6 +18,7 @@ export default function Settings({
   const [actionError, setActionError] = useState('');
   const [actionSuccess, setActionSuccess] = useState('');
   const [importing, setImporting] = useState(false);
+  const [bioActive, setBioActive] = useState(false);
 
   const [notificationPermission, setNotificationPermission] = useState(
     typeof window !== 'undefined' && 'Notification' in window ? Notification.permission : 'default'
@@ -764,6 +765,38 @@ _Sent from Kiosk Ledger PWA_`;
             className="hidden"
           />
         </label>
+      </div>
+
+      {/* Biometric Security Control Panel */}
+      <div className="bg-slate-900/40 border border-slate-800 rounded-2xl p-4 flex flex-col gap-3">
+        <div className="flex justify-between items-center">
+          <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
+            <Fingerprint className="w-3.5 h-3.5 text-amber-400" /> Biometric Fingerprint Login
+          </h3>
+          <span className={`px-2 py-0.5 rounded text-[8px] font-bold uppercase tracking-wider ${
+            bioActive ? 'bg-emerald-500/10 border border-emerald-500/20 text-emerald-400' : 'bg-slate-800 text-slate-400'
+          }`}>
+            {bioActive ? 'ACTIVE (Fingerprint Primary)' : 'DISABLED (PIN Only)'}
+          </span>
+        </div>
+
+        <p className="text-[11px] text-slate-400 leading-relaxed">
+          {bioActive
+            ? 'Fingerprint biometrics are set as your PRIMARY login mode on refresh/load, with 4-Digit PIN as secondary backup.'
+            : 'Enable fingerprint scanner or Windows Hello / FaceID to automatically authenticate on app launch.'}
+        </p>
+
+        <button
+          onClick={toggleBiometrics}
+          className={`w-full h-11 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all active:scale-[0.98] ${
+            bioActive
+              ? 'bg-slate-900 border border-slate-800 text-slate-300 hover:text-white'
+              : 'bg-amber-400 hover:bg-amber-500 text-slate-950 shadow-lg'
+          }`}
+        >
+          <Fingerprint className="w-4 h-4" />
+          {bioActive ? 'Disable Biometric Fingerprint' : 'Activate Biometric Fingerprint Login'}
+        </button>
       </div>
 
       {/* Security Actions & Demos */}

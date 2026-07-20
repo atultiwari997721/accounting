@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Landmark, ClipboardList, PlusCircle, CreditCard, ChevronRight, Search, Calendar, Edit3 } from 'lucide-react';
 
 export default function PassbookAccounts({ 

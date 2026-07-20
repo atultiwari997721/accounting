@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { IndianRupee, Wallet, Landmark, TrendingUp, Calendar, AlertTriangle, ArrowUpRight, ClipboardList, Edit2, Check, X } from 'lucide-react';
 
 export default function Dashboard({ activeDay, accounts, transactions, onNavigateToAddTx, onAdjustCash }) {
@@ -6,18 +6,27 @@ export default function Dashboard({ activeDay, accounts, transactions, onNavigat
   const [editCashVal, setEditCashVal] = useState('');
   const [savingCash, setSavingCash] = useState(false);
 
-  // Calculations
-  const totalBankBalance = accounts.reduce((sum, acc) => sum + (acc.currentBalance || 0), 0);
-  const cashInHand = activeDay ? activeDay.closingCash : 0;
-  const todayProfit = activeDay ? activeDay.totalProfit : 0;
-  const openingCash = activeDay ? activeDay.openingCash : 0;
+  // Memoized calculations for ultra-fast performance
+  const { totalBankBalance, cashInHand, todayProfit, openingCash, totalAssets, cashPercentage, bankPercentage } = useMemo(() => {
+    const totalBank = (accounts || []).reduce((sum, acc) => sum + (acc.currentBalance || 0), 0);
+    const cash = activeDay ? activeDay.closingCash : 0;
+    const profit = activeDay ? activeDay.totalProfit : 0;
+    const openCash = activeDay ? activeDay.openingCash : 0;
+    const assets = cash + totalBank;
+    const cPct = assets > 0 ? (cash / assets) * 100 : 0;
+    const bPct = assets > 0 ? (totalBank / assets) * 100 : 0;
+    return {
+      totalBankBalance: totalBank,
+      cashInHand: cash,
+      todayProfit: profit,
+      openingCash: openCash,
+      totalAssets: assets,
+      cashPercentage: cPct,
+      bankPercentage: bPct
+    };
+  }, [accounts, activeDay]);
 
   const formatINR = (num) => '₹' + Number(num || 0).toLocaleString('en-IN');
-
-  // Distribution calculation
-  const totalAssets = cashInHand + totalBankBalance;
-  const cashPercentage = totalAssets > 0 ? (cashInHand / totalAssets) * 100 : 0;
-  const bankPercentage = totalAssets > 0 ? (totalBankBalance / totalAssets) * 100 : 0;
 
   return (
     <div className="flex flex-col gap-5 px-4 pt-4 select-none">
