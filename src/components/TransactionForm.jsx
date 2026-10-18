@@ -6,7 +6,6 @@ export default function TransactionForm({ activeDay, accounts, onSubmitTransacti
   const [amount, setAmount] = useState('');
   const [selectedBankId, setSelectedBankId] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [showCommModal, setShowCommModal] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
   const [quickOpeningCash, setQuickOpeningCash] = useState('');
@@ -138,8 +137,8 @@ export default function TransactionForm({ activeDay, accounts, onSubmitTransacti
       }
     }
 
-    // Pass validations, prompt user to confirm the commission mode
-    setShowCommModal(true);
+    // Execute transaction directly using the user's chosen commissionMode
+    handleCommissionChosen(commissionMode);
   };
 
   // Helper to calculate notes total
@@ -185,8 +184,6 @@ export default function TransactionForm({ activeDay, accounts, onSubmitTransacti
   };
 
   const handleCommissionChosen = (selectedMode) => {
-    setShowCommModal(false);
-
     if (selectedMode === 'udhar' && (!customerName || !customerName.trim())) {
       setErrorMsg('Customer Name is REQUIRED for Udhar (Credit) transactions!');
       return;
@@ -689,70 +686,6 @@ export default function TransactionForm({ activeDay, accounts, onSubmitTransacti
             )}
           </button>
         </form>
-      )}
-
-      {/* Confirmation Modal */}
-      {showCommModal && (
-        <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white border border-slate-200 rounded-3xl p-6 w-full max-w-sm flex flex-col gap-4 text-center shadow-2xl animate-in fade-in zoom-in-95 duration-150">
-            <div className="mx-auto p-3 bg-blue-50 rounded-full border border-blue-200 w-fit">
-              <HelpCircle className="w-6 h-6 text-blue-600" />
-            </div>
-            
-            <div>
-              <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wide">Confirm Payment Method</h3>
-              <p className="text-[11px] text-slate-500 mt-1.5 leading-relaxed">
-                For this <span className="text-slate-900 font-bold">{formatINR(numAmount)}</span> {txType === 'Credit' ? 'Withdrawal' : 'Deposit'}, confirm how payment/commission is settled:
-              </p>
-            </div>
-
-            <div className="flex flex-col gap-2 mt-1">
-              <button
-                type="button"
-                onClick={() => handleCommissionChosen('deducted')}
-                className="w-full py-2.5 px-3.5 bg-slate-50 hover:bg-slate-100 border border-slate-200 hover:border-blue-500 rounded-2xl flex justify-between items-center text-left transition-all"
-              >
-                <span className="text-xs font-bold text-slate-800">1. Deducted (Cut Payout)</span>
-                <span className="text-[9px] font-bold text-blue-700 bg-blue-100 px-2 py-0.5 rounded">Deducted</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => handleCommissionChosen('cash')}
-                className="w-full py-2.5 px-3.5 bg-slate-50 hover:bg-slate-100 border border-slate-200 hover:border-emerald-500 rounded-2xl flex justify-between items-center text-left transition-all"
-              >
-                <span className="text-xs font-bold text-slate-800">2. Extra Cash Paid</span>
-                <span className="text-[9px] font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded">Cash</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => handleCommissionChosen('bank')}
-                className="w-full py-2.5 px-3.5 bg-slate-50 hover:bg-slate-100 border border-slate-200 hover:border-blue-500 rounded-2xl flex justify-between items-center text-left transition-all"
-              >
-                <span className="text-xs font-bold text-slate-800">3. Paid via Online Bank</span>
-                <span className="text-[9px] font-bold text-blue-700 bg-blue-100 px-2 py-0.5 rounded">Bank</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => handleCommissionChosen('udhar')}
-                className="w-full py-2.5 px-3.5 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-2xl flex justify-between items-center text-left transition-all"
-              >
-                <span className="text-xs font-bold text-rose-800">4. Mark as UDHAR (Credit)</span>
-                <span className="text-[9px] font-bold text-rose-700 bg-rose-100 px-2 py-0.5 rounded">Udhar</span>
-              </button>
-            </div>
-
-            <button
-              type="button"
-              onClick={() => setShowCommModal(false)}
-              className="w-full py-2.5 mt-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl transition-all border border-slate-200"
-            >
-              Cancel
-            </button>
-          </div>
-        </div>
       )}
 
       {/* Physical Notes Deducting / Adding Modal (with Skip Now option) */}
