@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { Settings as SettingsIcon, Play, Square, Download, Upload, ShieldAlert, RefreshCw, AlertCircle, Sparkles, RefreshCcw, Fingerprint, Calculator, FileText } from 'lucide-react';
+import { Settings as SettingsIcon, Play, Square, Download, Upload, ShieldAlert, RefreshCw, AlertCircle, Sparkles, RefreshCcw, Fingerprint, Calculator, FileText, Share2, Clock } from 'lucide-react';
 import DenominationModal from './DenominationModal';
 import CashStatementReceipt from './CashStatementReceipt';
+import DetailedStatementReportModal from './DetailedStatementReportModal';
 
 export default function Settings({ 
   activeDay, 
@@ -32,6 +33,8 @@ export default function Settings({
   const [closeDenoms, setCloseDenoms] = useState({ n500: 0, n200: 0, n100: 0, n50: 0, n20: 0, n10: 0, coins: 0, c20: 0, c10: 0, c5: 0, c2: 0, c1: 0 });
   const [showReceiptModal, setShowReceiptModal] = useState(false);
   const [receiptParams, setReceiptParams] = useState(null);
+  const [selectedReportDay, setSelectedReportDay] = useState(null);
+  const [showReportModal, setShowReportModal] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [actionError, setActionError] = useState('');
   const [actionSuccess, setActionSuccess] = useState('');
@@ -588,25 +591,37 @@ _Sent from Kiosk Ledger PWA_`;
                 </button>
               </div>
 
-              <button
-                type="button"
-                onClick={() => {
-                  const accs = JSON.parse(localStorage.getItem('kiosk_accounts') || '[]');
-                  const totalOnline = accs.reduce((sum, a) => sum + (Number(a.currentBalance) || 0), 0);
-                  setReceiptParams({
-                    dateStr: activeDay?.date || todayStr,
-                    totalCash: activeDay?.closingCash || 0,
-                    denominations: activeDay?.cashDenominations || {},
-                    onlineAmount: totalOnline,
-                    accountName: 'SBI Kiosk Cash Calculation',
-                    bankAccounts: getBankAccountsSnapshot()
-                  });
-                  setShowReceiptModal(true);
-                }}
-                className="w-full h-10 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all shadow-xs"
-              >
-                <FileText className="w-4 h-4 text-blue-600" /> View Cash & Online Receipt
-              </button>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedReportDay(activeDay);
+                    setShowReportModal(true);
+                  }}
+                  className="h-10 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all shadow-xs"
+                >
+                  <FileText className="w-3.5 h-3.5" /> Full Statement
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const accs = JSON.parse(localStorage.getItem('kiosk_accounts') || '[]');
+                    const totalOnline = accs.reduce((sum, a) => sum + (Number(a.currentBalance) || 0), 0);
+                    setReceiptParams({
+                      dateStr: activeDay?.date || todayStr,
+                      totalCash: activeDay?.closingCash || 0,
+                      denominations: activeDay?.cashDenominations || {},
+                      onlineAmount: totalOnline,
+                      accountName: 'SBI Kiosk Cash Calculation',
+                      bankAccounts: getBankAccountsSnapshot()
+                    });
+                    setShowReceiptModal(true);
+                  }}
+                  className="h-10 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all shadow-xs"
+                >
+                  <Calculator className="w-3.5 h-3.5 text-blue-600" /> Cash Slip
+                </button>
+              </div>
             </div>
           </div>
         ) : (
@@ -625,7 +640,17 @@ _Sent from Kiosk Ledger PWA_`;
                   <span className="text-slate-500 font-medium">Net Profit Earned:</span>
                   <span className="font-black text-emerald-600">{formatINR(todayClosedLedger.totalProfit)}</span>
                 </div>
-                <div className="flex gap-2 mt-1.5">
+                <div className="grid grid-cols-3 gap-2 mt-1.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedReportDay(todayClosedLedger);
+                      setShowReportModal(true);
+                    }}
+                    className="h-10 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1 shadow-xs"
+                  >
+                    <FileText className="w-3.5 h-3.5" /> Statement
+                  </button>
                   <button
                     type="button"
                     onClick={() => {
@@ -641,15 +666,15 @@ _Sent from Kiosk Ledger PWA_`;
                       });
                       setShowReceiptModal(true);
                     }}
-                    className="flex-1 h-10 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-xl text-xs font-bold flex items-center justify-center gap-1 shadow-xs"
+                    className="h-10 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-xl text-xs font-bold flex items-center justify-center gap-1 shadow-xs"
                   >
-                    <FileText className="w-3.5 h-3.5 text-blue-600" /> View Receipt
+                    <Calculator className="w-3.5 h-3.5 text-blue-600" /> Slip
                   </button>
                   <button
                     type="button"
                     onClick={handleReopen}
                     disabled={isSubmitting}
-                    className="flex-1 h-10 bg-amber-500 hover:bg-amber-600 active:scale-95 transition-all text-slate-950 rounded-xl text-xs font-bold flex items-center justify-center gap-1 shadow-xs"
+                    className="h-10 bg-amber-500 hover:bg-amber-600 active:scale-95 transition-all text-slate-950 rounded-xl text-xs font-bold flex items-center justify-center gap-1 shadow-xs"
                   >
                     <RefreshCcw className="w-3.5 h-3.5" /> Reopen
                   </button>
@@ -924,6 +949,21 @@ _Sent from Kiosk Ledger PWA_`;
           onlineAmount={receiptParams.onlineAmount}
           bankAccounts={receiptParams.bankAccounts || getBankAccountsSnapshot()}
           kioskTitle="SBI Kiosk"
+        />
+      )}
+
+      {/* Detailed Statement & Audit Report Modal */}
+      {selectedReportDay && (
+        <DetailedStatementReportModal
+          isOpen={showReportModal}
+          onClose={() => {
+            setShowReportModal(false);
+            setSelectedReportDay(null);
+          }}
+          day={selectedReportDay}
+          transactions={transactions}
+          accounts={accounts}
+          kioskTitle="SBI Kiosk Banking Point"
         />
       )}
     </div>

@@ -181,19 +181,48 @@ export default function App() {
     return { success: true };
   };
 
+  const buildBankBalancesSnapshot = () => {
+    const accs = JSON.parse(localStorage.getItem('kiosk_accounts') || '[]');
+    const bankBals = {};
+    accs.forEach(a => {
+      bankBals[a.bankName] = Number(a.currentBalance) || 0;
+    });
+    return bankBals;
+  };
+
   const adjustPhysicalCashLocal = (closingCash, cashDenominations) => {
     let day = JSON.parse(localStorage.getItem('kiosk_active_day') || 'null');
-    const today = new Date().toISOString().split('T')[0];
+    const today = new Date().toLocaleDateString('en-CA');
     const defaultDenoms = { n500: 0, n200: 0, n100: 0, n50: 0, n20: 0, n10: 0, coins: 0, c20: 0, c10: 0, c5: 0, c2: 0, c1: 0 };
-    
+    const bankBals = buildBankBalancesSnapshot();
+    const nowIso = new Date().toISOString();
+
     if (!day) {
+      const openEvent = {
+        id: 'evt_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
+        type: 'OPEN',
+        timestamp: nowIso,
+        cash: Number(closingCash) || 0,
+        cashDenominations: cashDenominations || defaultDenoms,
+        bankBalances: bankBals,
+        note: 'Auto Ledger Opened'
+      };
+
       day = {
         date: today,
+        openedAt: nowIso,
         openingCash: Number(closingCash) || 0,
         closingCash: Number(closingCash) || 0,
+        openingDenominations: cashDenominations || defaultDenoms,
+        openingBankBalances: bankBals,
+        closingBankBalances: bankBals,
+        bankBalances: bankBals,
         totalProfit: 0,
         status: 'Open',
-        cashDenominations: cashDenominations || defaultDenoms
+        cashDenominations: cashDenominations || defaultDenoms,
+        openCloseEvents: [openEvent],
+        openCount: 1,
+        closeCount: 0
       };
       localStorage.setItem('kiosk_active_day', JSON.stringify(day));
       loadDataLocal();
@@ -203,6 +232,9 @@ export default function App() {
     
     day.closingCash = Number(closingCash) || 0;
     if (cashDenominations) day.cashDenominations = cashDenominations;
+    if (!day.openingBankBalances) day.openingBankBalances = bankBals;
+    day.closingBankBalances = bankBals;
+    day.bankBalances = bankBals;
     localStorage.setItem('kiosk_active_day', JSON.stringify(day));
     loadDataLocal();
     return { success: true, day };
@@ -249,41 +281,88 @@ export default function App() {
     const defaultDenoms = cashDenominations || { n500: 0, n200: 0, n100: 0, n50: 0, n20: 0, n10: 0, coins: 0 };
     const active = JSON.parse(localStorage.getItem('kiosk_active_day') || 'null');
     if (active && active.status === 'Open') return { success: false, error: 'Day already open' };
+    
+    const bankBals = buildBankBalancesSnapshot();
+    const nowIso = new Date().toISOString();
+    const openEvent = {
+      id: 'evt_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
+      type: 'OPEN',
+      timestamp: nowIso,
+      cash: Number(openingCash) || 0,
+      cashDenominations: defaultDenoms,
+      bankBalances: bankBals,
+      note: 'Ledger Opened'
+    };
+
     const day = {
       date,
-      openingCash,
-      closingCash: openingCash,
+      openedAt: nowIso,
+      openingCash: Number(openingCash) || 0,
+      closingCash: Number(openingCash) || 0,
+      openingDenominations: defaultDenoms,
+      openingBankBalances: bankBals,
+      closingBankBalances: bankBals,
+      bankBalances: bankBals,
       totalProfit: 0,
       status: 'Open',
-      cashDenominations: defaultDenoms
+      cashDenominations: defaultDenoms,
+      openCloseEvents: [openEvent],
+      openCount: 1,
+      closeCount: 0
     };
     localStorage.setItem('kiosk_active_day', JSON.stringify(day));
     loadDataLocal();
-    triggerNotification('Ledger Open', `Ledger opened for ${date} with ₹${openingCash.toLocaleString('en-IN')} cash.`);
+    triggerNotification('Ledger Open', `Ledger opened for ${date} with ₹${Number(openingCash).toLocaleString('en-IN')} cash.`);
     return { success: true };
   };
 
   const handleCloseDay = async (closingCash, cashDenominations) => {
-    const buildLocalBalancesSnapshot = () => {
-      const accs = JSON.parse(localStorage.getItem('kiosk_accounts') || '[]');
-      const bankBals = {};
-      accs.forEach(a => {
-        bankBals[a.bankName] = a.currentBalance;
-      });
-      return bankBals;
-    };
-
     const day = JSON.parse(localStorage.getItem('kiosk_active_day') || 'null');
     if (!day) return { success: false, error: 'No open ledger' };
-    if (typeof closingCash === 'number') {
-      day.closingCash = closingCash;
-    }
-    if (cashDenominations) {
-      day.cashDenominations = cashDenominations;
-    }
+
+    const finalCash = typeof closingCash === 'number' ? closingCash : (Number(day.closingCash) || 0);
+    const finalDenoms = cashDenominations || day.cashDenominations;
+    const closingBankBals = buildBankBalancesSnapshot();
+    const nowIso = new Date().toISOString();
+
+    day.closingCash = finalCash;
+    day.cashDenominations = finalDenoms;
     day.status = 'Closed';
-    day.closedAt = new Date().toISOString();
-    day.bankBalances = buildLocalBalancesSnapshot();
+    day.closedAt = nowIso;
+    day.closingBankBalances = closingBankBals;
+    day.bankBalances = closingBankBals;
+
+    if (!day.openingBankBalances) {
+      day.openingBankBalances = closingBankBals;
+    }
+
+    if (!Array.isArray(day.openCloseEvents) || day.openCloseEvents.length === 0) {
+      day.openCloseEvents = [
+        {
+          id: 'evt_open_init',
+          type: 'OPEN',
+          timestamp: day.openedAt || new Date(new Date(day.date).setHours(9, 0, 0, 0)).toISOString(),
+          cash: day.openingCash,
+          cashDenominations: day.openingDenominations || day.cashDenominations,
+          bankBalances: day.openingBankBalances || closingBankBals,
+          note: 'Initial Open'
+        }
+      ];
+      day.openCount = 1;
+    }
+
+    const closeEvent = {
+      id: 'evt_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
+      type: 'CLOSE',
+      timestamp: nowIso,
+      cash: finalCash,
+      cashDenominations: finalDenoms,
+      bankBalances: closingBankBals,
+      note: 'Ledger Closed'
+    };
+
+    day.openCloseEvents.push(closeEvent);
+    day.closeCount = (Number(day.closeCount) || 0) + 1;
 
     const history = JSON.parse(localStorage.getItem('kiosk_day_history') || '[]');
     const filtered = history.filter(h => h.date !== day.date);
@@ -303,6 +382,25 @@ export default function App() {
 
     const day = history[idx];
     day.status = 'Open';
+    
+    const nowIso = new Date().toISOString();
+    const bankBals = buildBankBalancesSnapshot();
+
+    const reopenEvent = {
+      id: 'evt_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
+      type: 'REOPEN',
+      timestamp: nowIso,
+      cash: day.closingCash,
+      cashDenominations: day.cashDenominations,
+      bankBalances: bankBals,
+      note: 'Ledger Reopened'
+    };
+
+    if (!Array.isArray(day.openCloseEvents)) {
+      day.openCloseEvents = [];
+    }
+    day.openCloseEvents.push(reopenEvent);
+    day.openCount = (Number(day.openCount) || 1) + 1;
 
     history.splice(idx, 1);
     localStorage.setItem('kiosk_day_history', JSON.stringify(history));
@@ -378,6 +476,7 @@ export default function App() {
             onAdjustCash={handleAdjustCash}
             onCloseDay={handleCloseDay}
             onOpenDay={handleOpenDay}
+            onReopenDay={handleReopenDay}
           />
         )}
         {activeTab === 'settings' && (

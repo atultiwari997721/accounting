@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Landmark, ClipboardList, PlusCircle, CreditCard, ChevronRight, Search, Calendar, Edit3, UserCheck, Calculator, Coins, IndianRupee, ArrowDownRight, ArrowUpRight, CheckCircle2, UserX, FileText, Square, RotateCcw, Check, Play, AlertTriangle } from 'lucide-react';
+import { Landmark, ClipboardList, PlusCircle, CreditCard, ChevronRight, Search, Calendar, Edit3, UserCheck, Calculator, Coins, IndianRupee, ArrowDownRight, ArrowUpRight, CheckCircle2, UserX, FileText, Square, RotateCcw, Check, Play, AlertTriangle, Download, Share2, Clock, Eye, History, ShieldCheck } from 'lucide-react';
 import DenominationModal from './DenominationModal';
 import CashStatementReceipt from './CashStatementReceipt';
+import DetailedStatementReportModal from './DetailedStatementReportModal';
 import { numberToIndianWords } from '../utils/numberToWords';
 
 export default function PassbookAccounts({ 
@@ -15,7 +16,8 @@ export default function PassbookAccounts({
   onSubmitTransaction,
   onAdjustCash,
   onCloseDay,
-  onOpenDay
+  onOpenDay,
+  onReopenDay
 }) {
   const [activeSubTab, setActiveSubTab] = useState('passbook'); // 'passbook' | 'cash_counter' | 'receipt' | 'udhar_jama' | 'accounts' | 'reports'
   const [bankName, setBankName] = useState('');
@@ -59,6 +61,10 @@ export default function PassbookAccounts({
 
   // EOD History expandable transactions state
   const [expandedDays, setExpandedDays] = useState({});
+  const [expandedAuditDays, setExpandedAuditDays] = useState({});
+  const [selectedStatementDay, setSelectedStatementDay] = useState(null);
+  const [showStatementModal, setShowStatementModal] = useState(false);
+  const [quickCopiedDay, setQuickCopiedDay] = useState(null);
 
   const [editableBalances, setEditableBalances] = useState({});
 
@@ -1342,103 +1348,390 @@ export default function PassbookAccounts({
             <p className="text-[10px] text-slate-500">Chronological snapshot feed of closed daily sessions, cash handbooks, and bank EOD balances.</p>
           </div>
 
-          {(dayHistory || []).length === 0 ? (
-            <div className="bg-white border border-slate-200 rounded-2xl p-6 text-center text-xs text-slate-400 font-bold shadow-xs">
-              No daily summaries history available yet.
-            </div>
-          ) : (
-            <div className="flex flex-col gap-3">
-              {(dayHistory || []).map((day) => {
-                const isClosed = day.status === 'Closed';
-                const balancesObj = day.bankBalances || {};
-                const balancesArray = Object.entries(balancesObj);
-                const dayTxs = (transactions || []).filter(t => t.timestamp.split('T')[0] === day.date);
-                
-                return (
-                  <div key={day.date} className="bg-white border border-slate-200 rounded-2xl p-4 flex flex-col gap-3 text-left shadow-sm">
-                    <div className="flex justify-between items-center border-b border-slate-100 pb-2">
-                      <div className="flex items-center gap-1.5">
-                        <Calendar className="w-4 h-4 text-blue-600" />
-                        <span className="text-xs font-bold text-slate-800">{day.date}</span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const onlineTotal = Object.values(day.bankBalances || {}).reduce((s, v) => s + (Number(v) || 0), 0);
-                            setReceiptParams({
-                              dateStr: day.date,
-                              totalCash: day.closingCash,
-                              denominations: day.cashDenominations || {},
-                              onlineAmount: onlineTotal,
-                              accountName: 'SBI Kiosk Cash Calculation',
-                              bankAccounts: day.bankBalances || {}
-                            });
-                            setShowReceiptModal(true);
-                          }}
-                          className="px-2 py-1 bg-blue-50 hover:bg-blue-100 active:scale-95 text-blue-700 border border-blue-200 rounded-lg text-[9px] font-bold flex items-center gap-1 transition-all shadow-xs"
-                        >
-                          <FileText className="w-3 h-3 text-blue-600" /> View Receipt
-                        </button>
-                        <span className={`px-2 py-0.5 rounded text-[8px] font-bold uppercase tracking-wider ${
-                          isClosed
-                            ? 'bg-red-50 border border-red-200 text-red-700'
-                            : 'bg-emerald-50 border border-emerald-200 text-emerald-700'
-                        }`}>
-                          {day.status}
-                        </span>
-                      </div>
-                    </div>
+          {(() => {
+            const displayDayHistory = (() => {
+              const list = [...(dayHistory || [])];
+              if (activeDay && activeDay.status === 'Open') {
+                if (!list.some(d => d.date === activeDay.date)) {
+                  list.unshift(activeDay);
+                }
+              }
+              return list;
+            })();
 
-                    <div className="grid grid-cols-3 gap-2 text-left">
-                      <div className="bg-slate-50 p-2 rounded-xl border border-slate-200 flex flex-col gap-0.5 shadow-2xs">
-                        <span className="text-[8px] text-slate-400 font-bold uppercase">Opening Cash</span>
-                        <span className="text-xs font-black text-slate-800">{formatINR(day.openingCash)}</span>
-                      </div>
-                      <div className="bg-slate-50 p-2 rounded-xl border border-slate-200 flex flex-col gap-0.5 shadow-2xs">
-                        <span className="text-[8px] text-slate-400 font-bold uppercase">Closing Cash</span>
-                        <span className="text-xs font-black text-slate-800">{formatINR(day.closingCash)}</span>
-                      </div>
-                      <div className="bg-slate-50 p-2 rounded-xl border border-slate-200 flex flex-col gap-0.5 shadow-2xs">
-                        <span className="text-[8px] text-slate-400 font-bold uppercase">Net Profit</span>
-                        <span className="text-xs font-black text-emerald-600">{formatINR(day.totalProfit)}</span>
-                      </div>
-                    </div>
+            if (displayDayHistory.length === 0) {
+              return (
+                <div className="bg-white border border-slate-200 rounded-2xl p-6 text-center text-xs text-slate-400 font-bold shadow-xs">
+                  No daily summaries history available yet.
+                </div>
+              );
+            }
 
-                    {/* Denomination Notes Breakdown if present */}
-                    {day.cashDenominations && (
-                      <div className="bg-slate-50 border border-slate-200 p-2.5 rounded-xl flex flex-col gap-1 text-[10px] shadow-2xs">
-                        <span className="text-[8px] text-slate-400 font-bold uppercase tracking-wider border-b border-slate-200 pb-1">Notes Denomination Snapshot</span>
-                        <div className="flex flex-wrap gap-1.5 mt-1 font-bold text-slate-800">
-                          {day.cashDenominations.n500 > 0 && <span className="bg-white border border-slate-200 px-1.5 py-0.5 rounded text-emerald-700">500×{day.cashDenominations.n500}</span>}
-                          {day.cashDenominations.n200 > 0 && <span className="bg-white border border-slate-200 px-1.5 py-0.5 rounded text-amber-700">200×{day.cashDenominations.n200}</span>}
-                          {day.cashDenominations.n100 > 0 && <span className="bg-white border border-slate-200 px-1.5 py-0.5 rounded text-blue-700">100×{day.cashDenominations.n100}</span>}
-                          {day.cashDenominations.n50 > 0 && <span className="bg-white border border-slate-200 px-1.5 py-0.5 rounded text-indigo-700">50×{day.cashDenominations.n50}</span>}
-                          {day.cashDenominations.n20 > 0 && <span className="bg-white border border-slate-200 px-1.5 py-0.5 rounded text-orange-700">20×{day.cashDenominations.n20}</span>}
-                          {day.cashDenominations.n10 > 0 && <span className="bg-white border border-slate-200 px-1.5 py-0.5 rounded text-purple-700">10×{day.cashDenominations.n10}</span>}
-                          {day.cashDenominations.c20 > 0 && <span className="bg-white border border-slate-200 px-1.5 py-0.5 rounded text-amber-700">c20×{day.cashDenominations.c20}</span>}
-                          {day.cashDenominations.c10 > 0 && <span className="bg-white border border-slate-200 px-1.5 py-0.5 rounded text-amber-700">c10×{day.cashDenominations.c10}</span>}
-                          {day.cashDenominations.c5 > 0 && <span className="bg-white border border-slate-200 px-1.5 py-0.5 rounded text-amber-700">c5×{day.cashDenominations.c5}</span>}
-                          {day.cashDenominations.c2 > 0 && <span className="bg-white border border-slate-200 px-1.5 py-0.5 rounded text-amber-700">c2×{day.cashDenominations.c2}</span>}
-                          {day.cashDenominations.c1 > 0 && <span className="bg-white border border-slate-200 px-1.5 py-0.5 rounded text-amber-700">c1×{day.cashDenominations.c1}</span>}
-                          {day.cashDenominations.coins > 0 && <span className="bg-white border border-slate-200 px-1.5 py-0.5 rounded text-amber-700">Coins: ₹{day.cashDenominations.coins}</span>}
-                        </div>
-                      </div>
-                    )}
+              return (
+                <div className="flex flex-col gap-4">
+                  {displayDayHistory.map((day) => {
+                    const isClosed = day.status === 'Closed';
+                    const isTodayActive = activeDay && activeDay.date === day.date && activeDay.status === 'Open';
+                    const dayTxs = (transactions || []).filter(t => (t.timestamp || '').split('T')[0] === day.date);
 
-                    {balancesArray.length > 0 && (
-                      <div className="bg-slate-50 border border-slate-200 p-2.5 rounded-xl flex flex-col gap-1.5 text-left shadow-2xs">
-                        <span className="text-[8px] text-slate-400 font-bold uppercase tracking-wider border-b border-slate-200 pb-1">Bank Balances at Close</span>
-                        <div className="grid grid-cols-2 gap-2">
-                          {balancesArray.map(([bank, bal]) => (
-                            <div key={bank} className="flex justify-between items-center text-[10px]">
-                              <span className="text-slate-600 font-semibold truncate max-w-[80px]">{bank}</span>
-                              <span className="text-blue-900 font-bold">{formatINR(bal)}</span>
+                    const closingBankBalances = day.closingBankBalances || day.bankBalances || {};
+                    const openingBankBalances = day.openingBankBalances || {};
+
+                    // Calculate net transactions by bank
+                    const netTxByBank = {};
+                    const bankInflow = {};
+                    const bankOutflow = {};
+                    let dayCashIn = 0;
+                    let dayCashOut = 0;
+                    let dayOnlineIn = 0;
+                    let dayOnlineOut = 0;
+                    let dayTxProfitSum = 0;
+
+                    dayTxs.forEach(tx => {
+                      const bName = tx.bankAccountId?.bankName || 'Bank';
+                      const cAmt = Number(tx.customerAmount) || 0;
+                      const cOut = Number(tx.cashOut) || 0;
+                      netTxByBank[bName] = (netTxByBank[bName] || 0) + cAmt;
+                      if (cAmt > 0) {
+                        bankInflow[bName] = (bankInflow[bName] || 0) + cAmt;
+                        dayOnlineIn += cAmt;
+                      } else if (cAmt < 0) {
+                        bankOutflow[bName] = (bankOutflow[bName] || 0) + Math.abs(cAmt);
+                        dayOnlineOut += Math.abs(cAmt);
+                      }
+                      if (cOut < 0) dayCashIn += Math.abs(cOut);
+                      else if (cOut > 0) dayCashOut += cOut;
+                      dayTxProfitSum += (Number(tx.profit) || 0);
+                    });
+
+                    const allDayBanks = Array.from(new Set([
+                      ...Object.keys(closingBankBalances),
+                      ...Object.keys(openingBankBalances),
+                      ...accounts.map(a => a.bankName),
+                      ...Object.keys(netTxByBank)
+                    ])).filter(Boolean);
+
+                    const bankModes = allDayBanks.map(bName => {
+                      const closeBal = closingBankBalances[bName] !== undefined
+                        ? Number(closingBankBalances[bName])
+                        : (accounts.find(a => a.bankName === bName)?.currentBalance || 0);
+                      const openBal = openingBankBalances[bName] !== undefined
+                        ? Number(openingBankBalances[bName])
+                        : Math.max(0, closeBal - (netTxByBank[bName] || 0));
+                      return {
+                        name: bName,
+                        openBal,
+                        inflow: bankInflow[bName] || 0,
+                        outflow: bankOutflow[bName] || 0,
+                        closeBal,
+                        netDiff: closeBal - openBal
+                      };
+                    });
+
+                    const openCash = Number(day.openingCash) || 0;
+                    const closeCash = Number(day.closingCash) || 0;
+                    const cashNetDiff = closeCash - openCash;
+
+                    const totalOpenOnline = bankModes.reduce((s, b) => s + b.openBal, 0);
+                    const totalCloseOnline = bankModes.reduce((s, b) => s + b.closeBal, 0);
+
+                    const grandOpenTotal = openCash + totalOpenOnline;
+                    const grandCloseTotal = closeCash + totalCloseOnline;
+                    const grandNetDiff = grandCloseTotal - grandOpenTotal;
+
+                    // Open / Close events & counts
+                    const rawEvents = Array.isArray(day.openCloseEvents) && day.openCloseEvents.length > 0
+                      ? day.openCloseEvents
+                      : [
+                          {
+                            id: 'evt_open_def',
+                            type: 'OPEN',
+                            timestamp: day.openedAt || `${day.date}T09:00:00.000Z`,
+                            cash: openCash,
+                            bankBalances: openingBankBalances,
+                            note: 'Initial Open'
+                          },
+                          ...(isClosed ? [{
+                            id: 'evt_close_def',
+                            type: 'CLOSE',
+                            timestamp: day.closedAt || `${day.date}T21:00:00.000Z`,
+                            cash: closeCash,
+                            bankBalances: closingBankBalances,
+                            note: 'Ledger Closed'
+                          }] : [])
+                        ];
+
+                    const openCount = Number(day.openCount) || rawEvents.filter(e => e.type === 'OPEN' || e.type === 'REOPEN').length || 1;
+                    const closeCount = Number(day.closeCount) || rawEvents.filter(e => e.type === 'CLOSE').length || (isClosed ? 1 : 0);
+                    const dayFinalProfit = Number(day.totalProfit !== undefined ? day.totalProfit : dayTxProfitSum);
+
+                    // Formatted summary text for WhatsApp/Clipboard
+                    const generateDaySummaryText = () => {
+                      let t = `🏛️ *SBI KIOSK STATEMENT - ${day.date}*\n`;
+                      t += `Status: ${day.status} | Sessions: Open ${openCount}x, Close ${closeCount}x\n`;
+                      t += `------------------------------------\n`;
+                      t += `💰 *OPENING BALANCES (ALL MODES):*\n`;
+                      t += `• Drawer Cash: ₹${openCash.toLocaleString('en-IN')}\n`;
+                      bankModes.forEach(b => {
+                        t += `• ${b.name}: ₹${b.openBal.toLocaleString('en-IN')}\n`;
+                      });
+                      t += `*Total Opening:* ₹${grandOpenTotal.toLocaleString('en-IN')}\n`;
+                      t += `------------------------------------\n`;
+                      t += `🏁 *CLOSING BALANCES (ALL MODES):*\n`;
+                      t += `• Drawer Cash: ₹${closeCash.toLocaleString('en-IN')}\n`;
+                      bankModes.forEach(b => {
+                        t += `• ${b.name}: ₹${b.closeBal.toLocaleString('en-IN')}\n`;
+                      });
+                      t += `*Total Closing:* ₹${grandCloseTotal.toLocaleString('en-IN')} (${grandNetDiff >= 0 ? '+' : ''}₹${grandNetDiff.toLocaleString('en-IN')})\n`;
+                      t += `------------------------------------\n`;
+                      t += `📈 *DAY FLOW & PROFIT:*\n`;
+                      t += `• Transactions: ${dayTxs.length} entries\n`;
+                      t += `• Cash Flow: In ₹${dayCashIn.toLocaleString('en-IN')} | Out ₹${dayCashOut.toLocaleString('en-IN')}\n`;
+                      t += `• Online Flow: In ₹${dayOnlineIn.toLocaleString('en-IN')} | Out ₹${dayOnlineOut.toLocaleString('en-IN')}\n`;
+                      t += `🏆 *TOTAL DAY NET PROFIT:* +₹${dayFinalProfit.toLocaleString('en-IN')}\n`;
+                      t += `------------------------------------\n`;
+                      return t;
+                    };
+
+                    const handleCopyDaySummary = async () => {
+                      try {
+                        await navigator.clipboard.writeText(generateDaySummaryText());
+                        setQuickCopiedDay(day.date);
+                        setTimeout(() => setQuickCopiedDay(null), 2000);
+                      } catch (e) {}
+                    };
+
+                    const handleShareDayWhatsApp = () => {
+                      const text = encodeURIComponent(generateDaySummaryText());
+                      window.open(`https://wa.me/?text=${text}`, '_blank');
+                    };
+
+                    return (
+                      <div key={day.date} className="bg-white border border-slate-200 rounded-3xl p-4 flex flex-col gap-3 text-left shadow-sm">
+                        {/* Day Card Header */}
+                        <div className="flex flex-wrap justify-between items-center gap-2 border-b border-slate-100 pb-2.5">
+                          <div className="flex items-center gap-2">
+                            <div className="w-8 h-8 rounded-xl bg-blue-50 border border-blue-200 flex items-center justify-center text-blue-700 font-black">
+                              <Calendar className="w-4 h-4" />
                             </div>
-                          ))}
+                            <div>
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-xs font-black text-slate-900">{day.date}</span>
+                                {isTodayActive && (
+                                  <span className="text-[8px] font-black bg-emerald-100 text-emerald-800 px-1.5 py-0.2 rounded-full border border-emerald-300 animate-pulse">
+                                    LIVE TODAY
+                                  </span>
+                                )}
+                              </div>
+                              <span className="text-[8.5px] font-bold text-slate-500">
+                                {dayTxs.length} Transactions Logged
+                              </span>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-1.5">
+                            <span className={`px-2 py-0.5 rounded-full text-[8px] font-black uppercase tracking-wider ${
+                              isClosed
+                                ? 'bg-red-50 border border-red-200 text-red-700'
+                                : 'bg-emerald-50 border border-emerald-200 text-emerald-700'
+                            }`}>
+                              {day.status}
+                            </span>
+
+                            {/* Open / Close Cycle Badge */}
+                            <span className="px-2 py-0.5 rounded-full text-[8px] font-extrabold bg-blue-50 border border-blue-200 text-blue-800 flex items-center gap-1">
+                              <Clock className="w-2.5 h-2.5 text-blue-600" />
+                              Open {openCount}x • Close {closeCount}x
+                            </span>
+                          </div>
                         </div>
-                      </div>
-                    )}
+
+                        {/* Top Action Toolbar for this Day */}
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 bg-slate-50 p-1.5 rounded-2xl border border-slate-200 text-[10px]">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSelectedStatementDay(day);
+                              setShowStatementModal(true);
+                            }}
+                            className="py-1.5 px-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold flex items-center justify-center gap-1 transition-all shadow-xs active:scale-95 text-[9.5px]"
+                          >
+                            <FileText className="w-3 h-3" /> Full Statement
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={handleShareDayWhatsApp}
+                            className="py-1.5 px-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 rounded-xl font-bold flex items-center justify-center gap-1 transition-all shadow-2xs active:scale-95 text-[9.5px]"
+                          >
+                            <Share2 className="w-3 h-3 text-emerald-600" /> Share WhatsApp
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={handleCopyDaySummary}
+                            className="py-1.5 px-2 bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 rounded-xl font-bold flex items-center justify-center gap-1 transition-all shadow-2xs active:scale-95 text-[9.5px]"
+                          >
+                            {quickCopiedDay === day.date ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3 text-slate-500" />}
+                            {quickCopiedDay === day.date ? 'Copied!' : 'Copy Report'}
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const onlineTotal = Object.values(day.bankBalances || {}).reduce((s, v) => s + (Number(v) || 0), 0);
+                              setReceiptParams({
+                                dateStr: day.date,
+                                totalCash: day.closingCash,
+                                denominations: day.cashDenominations || {},
+                                onlineAmount: onlineTotal,
+                                accountName: 'SBI Kiosk Cash Calculation',
+                                bankAccounts: day.bankBalances || {}
+                              });
+                              setShowReceiptModal(true);
+                            }}
+                            className="py-1.5 px-2 bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 rounded-xl font-bold flex items-center justify-center gap-1 transition-all shadow-2xs active:scale-95 text-[9.5px]"
+                          >
+                            <Coins className="w-3 h-3 text-amber-600" /> Cash Slip
+                          </button>
+                        </div>
+
+                        {/* MODE-WISE OPENING & CLOSING BALANCE SHEET */}
+                        <div className="bg-slate-50 border border-slate-200 rounded-2xl p-2.5 flex flex-col gap-2 shadow-2xs">
+                          <div className="flex justify-between items-center text-[9px] font-extrabold uppercase text-slate-600 pb-1 border-b border-slate-200">
+                            <span className="flex items-center gap-1">
+                              <Landmark className="w-3 h-3 text-blue-600" />
+                              All Modes Opening vs Closing Balances
+                            </span>
+                            <span className="text-slate-400 font-semibold">Cash + Online</span>
+                          </div>
+
+                          {/* Table Grid of All Modes */}
+                          <div className="flex flex-col gap-1.5">
+                            {/* Drawer Cash Row */}
+                            <div className="bg-white border border-slate-200 rounded-xl p-2 flex items-center justify-between text-[10px]">
+                              <div className="flex items-center gap-1.5">
+                                <Coins className="w-3.5 h-3.5 text-amber-600" />
+                                <div className="flex flex-col">
+                                  <span className="font-bold text-slate-800">Drawer Physical Cash</span>
+                                  <span className="text-[8px] text-slate-400">Opening: {formatINR(openCash)}</span>
+                                </div>
+                              </div>
+                              <div className="flex flex-col text-right">
+                                <span className="font-black text-amber-950 text-xs">{formatINR(closeCash)}</span>
+                                <span className={`text-[8px] font-bold ${cashNetDiff >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
+                                  {cashNetDiff >= 0 ? '+' : ''}{formatINR(cashNetDiff)} change
+                                </span>
+                              </div>
+                            </div>
+
+                            {/* Each Bank Account Row */}
+                            {bankModes.map(b => (
+                              <div key={b.name} className="bg-white border border-slate-200 rounded-xl p-2 flex items-center justify-between text-[10px]">
+                                <div className="flex items-center gap-1.5">
+                                  <Landmark className="w-3.5 h-3.5 text-blue-600" />
+                                  <div className="flex flex-col">
+                                    <span className="font-bold text-slate-700">{b.name} (Online)</span>
+                                    <span className="text-[8px] text-slate-400">Opening: {formatINR(b.openBal)}</span>
+                                  </div>
+                                </div>
+                                <div className="flex flex-col text-right">
+                                  <span className="font-black text-blue-950 text-xs">{formatINR(b.closeBal)}</span>
+                                  <span className={`text-[8px] font-bold ${b.netDiff >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
+                                    {b.netDiff >= 0 ? '+' : ''}{formatINR(b.netDiff)} change
+                                  </span>
+                                </div>
+                              </div>
+                            ))}
+
+                            {/* GRAND TOTAL ROW */}
+                            <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-xl p-2.5 flex items-center justify-between text-[10px] shadow-2xs">
+                              <div className="flex flex-col">
+                                <span className="text-[8px] font-black uppercase text-blue-700 tracking-wider">Grand Total Liquidity (All Modes)</span>
+                                <span className="text-[8.5px] font-semibold text-slate-500">Opening: {formatINR(grandOpenTotal)}</span>
+                              </div>
+                              <div className="flex flex-col text-right">
+                                <span className="text-xs font-black text-blue-900">{formatINR(grandCloseTotal)}</span>
+                                <span className={`text-[8.5px] font-black ${grandNetDiff >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
+                                  {grandNetDiff >= 0 ? '+' : ''}{formatINR(grandNetDiff)} net growth
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* DATE & TIME WISE OPEN/CLOSE AUDIT TIMELINE (EXPANDABLE) */}
+                        <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-2xs">
+                          <button
+                            type="button"
+                            onClick={() => setExpandedAuditDays(prev => ({ ...prev, [day.date]: !prev[day.date] }))}
+                            className="w-full py-2 px-3 bg-slate-50 hover:bg-slate-100 flex items-center justify-between text-[10px] font-extrabold text-slate-700 transition-all border-b border-slate-200"
+                          >
+                            <span className="flex items-center gap-1.5 text-blue-700">
+                              <Clock className="w-3.5 h-3.5" />
+                              Date & Time Open / Close History ({rawEvents.length} Sessions)
+                            </span>
+                            <span className="text-[9px] font-bold text-blue-600">
+                              {expandedAuditDays[day.date] ? '▲ Hide Timeline' : '▼ View Times & Balances'}
+                            </span>
+                          </button>
+
+                          {expandedAuditDays[day.date] && (
+                            <div className="p-3 flex flex-col gap-2 bg-slate-50/50">
+                              {rawEvents.map((ev, evIdx) => {
+                                const dObj = new Date(ev.timestamp);
+                                const tStr = dObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+                                const isOp = ev.type === 'OPEN';
+                                const isRe = ev.type === 'REOPEN';
+
+                                const evBankTotal = Object.values(ev.bankBalances || {}).reduce((s, v) => s + (Number(v) || 0), 0);
+                                const evTotal = (Number(ev.cash) || 0) + evBankTotal;
+
+                                return (
+                                  <div key={ev.id || evIdx} className="bg-white border border-slate-200 rounded-xl p-2 flex flex-col gap-1 text-[9.5px]">
+                                    <div className="flex justify-between items-center">
+                                      <div className="flex items-center gap-1.5">
+                                        <span className={`px-1.5 py-0.2 rounded text-[8px] font-black uppercase ${
+                                          isOp ? 'bg-emerald-100 text-emerald-800' : isRe ? 'bg-amber-100 text-amber-800' : 'bg-rose-100 text-rose-800'
+                                        }`}>
+                                          {isOp ? '🟢 OPEN' : isRe ? '🟡 REOPEN' : '🔴 CLOSE'}
+                                        </span>
+                                        <span className="font-bold text-slate-700">{tStr}</span>
+                                      </div>
+                                      <span className="text-[8px] text-slate-400 italic">{ev.note || '-'}</span>
+                                    </div>
+                                    <div className="flex justify-between items-center text-[9px] pt-1 border-t border-slate-100 text-slate-600">
+                                      <span>Drawer Cash: <b>{formatINR(ev.cash)}</b></span>
+                                      <span>Online: <b>{formatINR(evBankTotal)}</b></span>
+                                      <span className="font-black text-slate-900">Total: {formatINR(evTotal)}</span>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Denomination Notes Breakdown if present */}
+                        {day.cashDenominations && (
+                          <div className="bg-slate-50 border border-slate-200 p-2.5 rounded-xl flex flex-col gap-1 text-[10px] shadow-2xs">
+                            <span className="text-[8px] text-slate-400 font-bold uppercase tracking-wider border-b border-slate-200 pb-1">Notes Denomination Snapshot</span>
+                            <div className="flex flex-wrap gap-1.5 mt-1 font-bold text-slate-800">
+                              {day.cashDenominations.n500 > 0 && <span className="bg-white border border-slate-200 px-1.5 py-0.5 rounded text-emerald-700">500×{day.cashDenominations.n500}</span>}
+                              {day.cashDenominations.n200 > 0 && <span className="bg-white border border-slate-200 px-1.5 py-0.5 rounded text-amber-700">200×{day.cashDenominations.n200}</span>}
+                              {day.cashDenominations.n100 > 0 && <span className="bg-white border border-slate-200 px-1.5 py-0.5 rounded text-blue-700">100×{day.cashDenominations.n100}</span>}
+                              {day.cashDenominations.n50 > 0 && <span className="bg-white border border-slate-200 px-1.5 py-0.5 rounded text-indigo-700">50×{day.cashDenominations.n50}</span>}
+                              {day.cashDenominations.n20 > 0 && <span className="bg-white border border-slate-200 px-1.5 py-0.5 rounded text-orange-700">20×{day.cashDenominations.n20}</span>}
+                              {day.cashDenominations.n10 > 0 && <span className="bg-white border border-slate-200 px-1.5 py-0.5 rounded text-purple-700">10×{day.cashDenominations.n10}</span>}
+                              {day.cashDenominations.c20 > 0 && <span className="bg-white border border-slate-200 px-1.5 py-0.5 rounded text-amber-700">c20×{day.cashDenominations.c20}</span>}
+                              {day.cashDenominations.c10 > 0 && <span className="bg-white border border-slate-200 px-1.5 py-0.5 rounded text-amber-700">c10×{day.cashDenominations.c10}</span>}
+                              {day.cashDenominations.c5 > 0 && <span className="bg-white border border-slate-200 px-1.5 py-0.5 rounded text-amber-700">c5×{day.cashDenominations.c5}</span>}
+                              {day.cashDenominations.c2 > 0 && <span className="bg-white border border-slate-200 px-1.5 py-0.5 rounded text-amber-700">c2×{day.cashDenominations.c2}</span>}
+                              {day.cashDenominations.c1 > 0 && <span className="bg-white border border-slate-200 px-1.5 py-0.5 rounded text-amber-700">c1×{day.cashDenominations.c1}</span>}
+                              {day.cashDenominations.coins > 0 && <span className="bg-white border border-slate-200 px-1.5 py-0.5 rounded text-amber-700">Coins: ₹{day.cashDenominations.coins}</span>}
+                            </div>
+                          </div>
+                        )}
 
                     {/* Expandable All Transactions (Date & Time Wise) */}
                     <button
@@ -1626,7 +1919,8 @@ export default function PassbookAccounts({
                 );
               })}
             </div>
-          )}
+          );
+        })()}
         </div>
       )}
 
@@ -1676,6 +1970,21 @@ export default function PassbookAccounts({
           onlineAmount={receiptParams.onlineAmount}
           bankAccounts={receiptParams.bankAccounts || getLiveBankAccountsList()}
           kioskTitle="SBI Kiosk"
+        />
+      )}
+
+      {/* Detailed Statement & Audit Report Modal */}
+      {selectedStatementDay && (
+        <DetailedStatementReportModal
+          isOpen={showStatementModal}
+          onClose={() => {
+            setShowStatementModal(false);
+            setSelectedStatementDay(null);
+          }}
+          day={selectedStatementDay}
+          transactions={transactions}
+          accounts={accounts}
+          kioskTitle="SBI Kiosk Banking Point"
         />
       )}
     </div>
