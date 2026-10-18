@@ -1443,7 +1443,7 @@ export default function PassbookAccounts({
                     {/* Expandable All Transactions (Date & Time Wise) */}
                     <button
                       type="button"
-                      onClick={() => setExpandedDays(prev => ({ ...prev, [day.date]: !prev[day.date] }))}
+                      onClick={() => setExpandedDays(prev => ({ ...prev, [day.date]: prev[day.date] === false ? true : false }))}
                       className="w-full py-2 px-3 bg-slate-50 hover:bg-slate-100 active:scale-[0.99] text-slate-700 rounded-xl text-[10px] font-extrabold flex items-center justify-between transition-all border border-slate-200 shadow-2xs"
                     >
                       <span className="flex items-center gap-1.5">
@@ -1451,15 +1451,15 @@ export default function PassbookAccounts({
                         Transactions on {day.date} ({dayTxs.length} entries)
                       </span>
                       <span className="text-[10px] text-blue-600 font-bold">
-                        {expandedDays[day.date] ? '▲ Collapse' : '▼ View Records'}
+                        {expandedDays[day.date] === false ? '▼ View Full Details' : '▲ Hide Details'}
                       </span>
                     </button>
 
-                    {expandedDays[day.date] && (
-                      <div className="flex flex-col gap-2 bg-slate-50 p-2.5 rounded-xl border border-slate-200 max-h-[320px] overflow-y-auto no-scrollbar">
+                    {expandedDays[day.date] !== false && (
+                      <div className="flex flex-col gap-2.5 bg-slate-50 p-2.5 rounded-xl border border-slate-200">
                         <div className="flex justify-between items-center text-[9px] font-bold uppercase tracking-wider text-slate-500 pb-1 border-b border-slate-200">
-                          <span>Time & Details</span>
-                          <span>Amounts & Notes</span>
+                          <span>Complete Time-wise Transaction Records</span>
+                          <span>{dayTxs.length} Logged</span>
                         </div>
 
                         {dayTxs.length === 0 ? (
@@ -1467,59 +1467,159 @@ export default function PassbookAccounts({
                             No individual transactions logged on this day.
                           </div>
                         ) : (
-                          dayTxs.map(tx => {
-                            const tStr = new Date(tx.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-                            const bName = tx.bankAccountId?.bankName || 'Local Bank';
+                          dayTxs.map((tx, txIdx) => {
+                            const dateObj = new Date(tx.timestamp);
+                            const tStr = dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                            const bName = tx.bankAccountId?.bankName || 'Bank Account';
                             const isUdhar = tx.commissionMode === 'Udhar';
                             const isJama = tx.type === 'Jama' || tx.commissionMode === 'Jama';
 
                             return (
-                              <div key={tx._id} className="bg-white p-2.5 rounded-lg border border-slate-200 flex flex-col gap-1 text-[10px] shadow-2xs">
-                                <div className="flex justify-between items-start">
-                                  <div className="flex flex-col text-left">
-                                    <div className="flex items-center gap-1 font-bold text-slate-800">
-                                      <span className="text-slate-400">{tStr}</span>
-                                      <span>•</span>
-                                      <span className="text-blue-700 font-extrabold">{bName}</span>
-                                      {isUdhar && <span className="text-[8px] bg-rose-50 text-rose-700 px-1 py-0.2 rounded border border-rose-200">UDHAR</span>}
-                                      {isJama && <span className="text-[8px] bg-emerald-50 text-emerald-700 px-1 py-0.2 rounded border border-emerald-200">JAMA</span>}
-                                    </div>
-                                    <span className="text-[9px] text-slate-500 mt-0.5">
-                                      Customer: <span className="font-bold text-slate-800">{tx.customerName || 'Walk-in'}</span>
+                              <div key={tx._id || txIdx} className="bg-white rounded-xl p-3 border border-slate-200 shadow-xs flex flex-col gap-2">
+                                {/* Header: Sequence, Time, Type, Mode, Single Transaction Profit */}
+                                <div className="flex flex-wrap items-center justify-between gap-1.5 border-b border-slate-100 pb-1.5">
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="text-[9px] font-black text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded">
+                                      #{txIdx + 1}
+                                    </span>
+                                    <span className="text-[10px] font-bold text-slate-600 bg-slate-100 px-1.5 py-0.5 rounded">
+                                      ⏰ {tStr}
+                                    </span>
+                                    <span className={`text-[9px] font-extrabold px-2 py-0.5 rounded-full border uppercase ${
+                                      isUdhar 
+                                        ? 'bg-rose-50 text-rose-700 border-rose-200' 
+                                        : isJama 
+                                          ? 'bg-emerald-50 text-emerald-700 border-emerald-200' 
+                                          : tx.type === 'Credit' 
+                                            ? 'bg-blue-50 text-blue-700 border-blue-200' 
+                                            : 'bg-indigo-50 text-indigo-700 border-indigo-200'
+                                    }`}>
+                                      {isUdhar ? 'Udhar (Credit)' : isJama ? 'Jama (Advance)' : tx.type === 'Credit' ? 'Withdrawal' : 'Deposit'}
+                                    </span>
+                                    <span className="text-[8.5px] font-bold text-slate-500 bg-slate-50 px-1.5 py-0.5 rounded border border-slate-200">
+                                      {tx.commissionMode || 'Deducted'}
                                     </span>
                                   </div>
 
-                                  <div className="text-right flex flex-col items-end">
-                                    <span className={`font-black ${isUdhar ? 'text-rose-600' : isJama ? 'text-emerald-600' : (tx.customerAmount >= 0 ? 'text-emerald-600' : 'text-rose-600')}`}>
-                                      {isUdhar ? `₹${Math.abs(tx.cashOut || tx.customerAmount)} UDHAR` : isJama ? `+${formatINR(Math.abs(tx.customerAmount || tx.cashOut))} JAMA` : (tx.customerAmount >= 0 ? '+' : '') + formatINR(tx.customerAmount)}
+                                  {/* PROFIT IN THIS SINGLE TRANSACTION */}
+                                  <div className="flex items-center gap-1 bg-emerald-50 text-emerald-800 border border-emerald-200 px-2 py-0.5 rounded-lg shadow-2xs">
+                                    <span className="text-[8.5px] font-bold text-emerald-600 uppercase">Tx Profit:</span>
+                                    <span className="text-xs font-black text-emerald-700">+{formatINR(tx.profit)}</span>
+                                  </div>
+                                </div>
+
+                                {/* Customer Name */}
+                                <div className="flex items-center justify-between text-xs text-slate-700 px-0.5">
+                                  <span className="text-slate-400 text-[10px] font-semibold">Customer:</span>
+                                  <span className="text-slate-900 font-extrabold">{tx.customerName || 'Walk-in Customer'}</span>
+                                </div>
+
+                                {/* Cash and Online Details in Single Transaction */}
+                                <div className="grid grid-cols-2 gap-2 text-left">
+                                  {/* Online Bank Details */}
+                                  <div className="bg-blue-50/70 border border-blue-200 rounded-xl p-2 flex flex-col gap-0.5">
+                                    <div className="flex items-center justify-between">
+                                      <span className="text-[8.5px] font-bold uppercase text-blue-800 flex items-center gap-1">
+                                        <Landmark className="w-3 h-3 text-blue-600" /> {bName}
+                                      </span>
+                                      <span className="text-[7.5px] font-bold bg-blue-100 text-blue-800 px-1 py-0.2 rounded">
+                                        Online
+                                      </span>
+                                    </div>
+                                    <span className={`text-xs font-black ${tx.customerAmount >= 0 ? 'text-blue-900' : 'text-rose-700'}`}>
+                                      {tx.customerAmount >= 0 ? `+${formatINR(tx.customerAmount)}` : `-${formatINR(Math.abs(tx.customerAmount))}`}
                                     </span>
-                                    <span className="text-[8.5px] text-slate-500">
-                                      {tx.cashOut > 0 ? `Cash Out: -${formatINR(tx.cashOut)}` : `Cash In: +${formatINR(Math.abs(tx.cashOut))}`}
+                                    <span className="text-[8px] text-blue-700/80 font-medium">
+                                      {tx.customerAmount >= 0 ? 'Customer paid / transferred' : 'Sent online to customer'}
+                                    </span>
+                                  </div>
+
+                                  {/* Drawer Physical Cash Details */}
+                                  <div className="bg-amber-50/70 border border-amber-200 rounded-xl p-2 flex flex-col gap-0.5">
+                                    <div className="flex items-center justify-between">
+                                      <span className="text-[8.5px] font-bold uppercase text-amber-800 flex items-center gap-1">
+                                        <Coins className="w-3 h-3 text-amber-600" /> Drawer Cash
+                                      </span>
+                                      <span className="text-[7.5px] font-bold bg-amber-100 text-amber-900 px-1 py-0.2 rounded">
+                                        Physical
+                                      </span>
+                                    </div>
+                                    <span className={`text-xs font-black ${tx.cashOut > 0 ? 'text-amber-900' : 'text-emerald-700'}`}>
+                                      {tx.cashOut > 0 ? `-${formatINR(tx.cashOut)} (Out)` : `+${formatINR(Math.abs(tx.cashOut))} (In)`}
+                                    </span>
+                                    <span className="text-[8px] text-amber-800/80 font-medium">
+                                      {tx.cashOut > 0 ? 'Deducted from drawer' : 'Added to drawer'}
                                     </span>
                                   </div>
                                 </div>
 
-                                {/* Notes Detail */}
-                                {tx.noteDetails && (
-                                  <div className="pt-1 border-t border-slate-100 flex justify-between items-center text-[8px] font-bold">
-                                    {tx.noteDetails.includes('Skipped') ? (
-                                      <span className="bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded border border-slate-200">
-                                        ⏳ Notes: Skipped (Counted at Close)
-                                      </span>
-                                    ) : (
-                                      <span className="bg-emerald-50 text-emerald-800 px-1.5 py-0.5 rounded border border-emerald-200">
-                                        💵 Notes: {tx.noteDetails}
-                                      </span>
-                                    )}
-                                    <span className="text-emerald-700 font-semibold">
-                                      +{formatINR(tx.profit)} profit
+                                {/* Physical Notes Used in that transaction */}
+                                <div className="bg-slate-50 border border-slate-200 rounded-lg p-1.5 flex items-center justify-between text-[10px]">
+                                  <span className="text-slate-500 font-bold flex items-center gap-1">
+                                    <Calculator className="w-3 h-3 text-slate-400" />
+                                    Notes Details:
+                                  </span>
+                                  {tx.noteDetails && tx.noteDetails.includes('Skipped') ? (
+                                    <span className="text-[8.5px] font-bold text-slate-600 bg-white border border-slate-200 px-2 py-0.5 rounded">
+                                      ⏳ Notes: Skipped (Counted at EOD)
                                     </span>
-                                  </div>
-                                )}
+                                  ) : tx.noteDetails ? (
+                                    <span className="text-[8.5px] font-black text-emerald-800 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded">
+                                      💵 {tx.noteDetails}
+                                    </span>
+                                  ) : (
+                                    <span className="text-[8.5px] text-slate-400 italic">No notes specified</span>
+                                  )}
+                                </div>
                               </div>
                             );
                           })
                         )}
+
+                        {/* AT THE LAST: Complete Day Profit & Flow Summary Banner */}
+                        {(() => {
+                          const dayCashIn = dayTxs.reduce((sum, t) => sum + (t.cashOut < 0 ? Math.abs(Number(t.cashOut)) : 0), 0);
+                          const dayCashOut = dayTxs.reduce((sum, t) => sum + (t.cashOut > 0 ? Number(t.cashOut) : 0), 0);
+                          const dayOnlineIn = dayTxs.reduce((sum, t) => sum + (t.customerAmount > 0 ? Number(t.customerAmount) : 0), 0);
+                          const dayOnlineOut = dayTxs.reduce((sum, t) => sum + (t.customerAmount < 0 ? Math.abs(Number(t.customerAmount)) : 0), 0);
+                          const dayProfitComputed = dayTxs.reduce((sum, t) => sum + (Number(t.profit) || 0), 0);
+                          const dayProfitFinal = Number(day.totalProfit !== undefined ? day.totalProfit : dayProfitComputed);
+
+                          return (
+                            <div className="mt-2 bg-gradient-to-r from-emerald-600 to-teal-700 text-white rounded-2xl p-4 shadow-md flex flex-col gap-2.5">
+                              <div className="flex justify-between items-center border-b border-emerald-400/40 pb-2">
+                                <div className="flex items-center gap-1.5">
+                                  <span className="text-xs font-black uppercase tracking-wider text-emerald-100 flex items-center gap-1">
+                                    🏆 Total Day Net Profit
+                                  </span>
+                                </div>
+                                <span className="text-xl font-black tracking-tight text-white drop-shadow-xs">
+                                  +{formatINR(dayProfitFinal)}
+                                </span>
+                              </div>
+
+                              {/* Cash & Online Flow Summary */}
+                              <div className="grid grid-cols-2 gap-2 text-[10px] font-bold">
+                                <div className="bg-white/10 rounded-xl p-2 flex flex-col gap-0.5">
+                                  <span className="text-emerald-100 text-[8px] uppercase">Drawer Cash Flow</span>
+                                  <span>Cash In: {formatINR(dayCashIn)}</span>
+                                  <span>Cash Out: {formatINR(dayCashOut)}</span>
+                                </div>
+
+                                <div className="bg-white/10 rounded-xl p-2 flex flex-col gap-0.5">
+                                  <span className="text-emerald-100 text-[8px] uppercase">Online Bank Flow</span>
+                                  <span>Online In: {formatINR(dayOnlineIn)}</span>
+                                  <span>Online Out: {formatINR(dayOnlineOut)}</span>
+                                </div>
+                              </div>
+
+                              <div className="flex justify-between items-center text-[10px] border-t border-emerald-400/40 pt-2 text-emerald-100 font-semibold">
+                                <span>Opening Cash: {formatINR(day.openingCash)}</span>
+                                <span className="text-white font-black">Closing Drawer Cash: {formatINR(day.closingCash)}</span>
+                              </div>
+                            </div>
+                          );
+                        })()}
                       </div>
                     )}
                   </div>
