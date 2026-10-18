@@ -1,11 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { Settings as SettingsIcon, Play, Square, Download, Upload, ShieldAlert, RefreshCw, AlertCircle, Sparkles, RefreshCcw, Fingerprint, Calculator } from 'lucide-react';
+import { Settings as SettingsIcon, Play, Square, Download, Upload, ShieldAlert, RefreshCw, AlertCircle, Sparkles, RefreshCcw, Fingerprint, Calculator, FileText } from 'lucide-react';
 import DenominationModal from './DenominationModal';
+import CashStatementReceipt from './CashStatementReceipt';
 
 export default function Settings({ 
   activeDay, 
   dayHistory = [], 
   transactions = [], 
+  accounts = [],
   onOpenDay, 
   onCloseDay, 
   onReopenDay, 
@@ -13,12 +15,23 @@ export default function Settings({
   onResetPin,
   onAdjustCash
 }) {
+  const getBankAccountsSnapshot = () => {
+    const list = accounts.length > 0 ? accounts : JSON.parse(localStorage.getItem('kiosk_accounts') || '[]');
+    return list.map(a => ({
+      id: a._id || a.id,
+      name: a.bankName || a.name,
+      balance: Number(a.currentBalance || a.balance || 0)
+    }));
+  };
+
   // 1. ALL STATE HOOKS (DECLARED UNCONDITIONALLY AT THE VERY TOP)
   const [openingCash, setOpeningCash] = useState('');
   const [showDenomModal, setShowDenomModal] = useState(false);
   const [openDenoms, setOpenDenoms] = useState({ n500: 0, n200: 0, n100: 0, n50: 0, n20: 0, n10: 0, coins: 0 });
   const [showCloseDenomModal, setShowCloseDenomModal] = useState(false);
   const [closeDenoms, setCloseDenoms] = useState({ n500: 0, n200: 0, n100: 0, n50: 0, n20: 0, n10: 0, coins: 0, c20: 0, c10: 0, c5: 0, c2: 0, c1: 0 });
+  const [showReceiptModal, setShowReceiptModal] = useState(false);
+  const [receiptParams, setReceiptParams] = useState(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [actionError, setActionError] = useState('');
   const [actionSuccess, setActionSuccess] = useState('');
@@ -183,6 +196,22 @@ export default function Settings({
   const handleCloseDay = () => {
     if (!window.confirm('Are you sure you want to CLOSE the ledger for today? You cannot record more transactions for today afterwards.')) return;
     
+    if (activeDay?.cashDenominations) {
+      setCloseDenoms({
+        n500: Number(activeDay.cashDenominations.n500) || 0,
+        n200: Number(activeDay.cashDenominations.n200) || 0,
+        n100: Number(activeDay.cashDenominations.n100) || 0,
+        n50: Number(activeDay.cashDenominations.n50) || 0,
+        n20: Number(activeDay.cashDenominations.n20) || 0,
+        n10: Number(activeDay.cashDenominations.n10) || 0,
+        coins: Number(activeDay.cashDenominations.coins) || 0,
+        c20: Number(activeDay.cashDenominations.c20) || 0,
+        c10: Number(activeDay.cashDenominations.c10) || 0,
+        c5: Number(activeDay.cashDenominations.c5) || 0,
+        c2: Number(activeDay.cashDenominations.c2) || 0,
+        c1: Number(activeDay.cashDenominations.c1) || 0
+      });
+    }
     // Open denomination modal for closing cash
     setShowCloseDenomModal(true);
   };
@@ -201,9 +230,21 @@ export default function Settings({
       }
     }
     
-    const res = await onCloseDay();
+    const accs = JSON.parse(localStorage.getItem('kiosk_accounts') || '[]');
+    const totalOnline = accs.reduce((sum, a) => sum + (Number(a.currentBalance) || 0), 0);
+
+    const res = await onCloseDay(totalCash, denoms);
     if (res.success) {
-      setActionSuccess('Business day ledger closed successfully!');
+      setActionSuccess('Business day ledger closed successfully! Receipt generated.');
+      setReceiptParams({
+        dateStr: activeDay?.date || todayStr,
+        totalCash: totalCash,
+        denominations: denoms,
+        onlineAmount: totalOnline,
+        accountName: 'SBI Kiosk Cash Calculation',
+        bankAccounts: getBankAccountsSnapshot()
+      });
+      setShowReceiptModal(true);
     } else {
       setActionError(res.error || 'Failed to close day summary.');
     }
@@ -503,85 +544,127 @@ _Sent from Kiosk Ledger PWA_`;
 
   return (
     <div className="flex flex-col gap-4 px-4 pt-4 pb-12 select-none">
-      <div className="flex flex-col gap-1">
-        <h2 className="text-lg font-bold text-slate-100 flex items-center gap-2">
-          <SettingsIcon className="w-5 h-5 text-amber-400" /> Settings & Backups
+      <div className="flex flex-col gap-0.5 text-left">
+        <h2 className="text-lg font-bold text-slate-800 flex items-center gap-2">
+          <SettingsIcon className="w-5 h-5 text-blue-600" /> Settings & Backups
         </h2>
-        <p className="text-xs text-slate-400">Manage daily ledger sessions, backups, and security settings</p>
+        <p className="text-xs text-slate-500">Manage daily ledger sessions, backups, and security settings</p>
       </div>
 
       {/* Daily Ledger Controls */}
-      <div className="bg-slate-900/40 border border-slate-800 rounded-2xl p-4 flex flex-col gap-3">
-        <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
-          <Square className="w-3.5 h-3.5 text-slate-400" /> Daily Ledger Controls
+      <div className="bg-white border border-slate-200 rounded-2xl p-4 flex flex-col gap-3 shadow-sm">
+        <h3 className="text-xs font-bold uppercase tracking-wider text-slate-600 flex items-center gap-1.5 text-left">
+          <Square className="w-3.5 h-3.5 text-blue-600" /> Daily Ledger Controls
         </h3>
 
         {activeDay ? (
           <div className="flex flex-col gap-3">
-            <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-850 flex flex-col gap-1 text-left">
-              <span className="text-[10px] text-slate-500">Date: {activeDay.date}</span>
+            <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 flex flex-col gap-1 text-left shadow-2xs">
+              <span className="text-[10px] text-slate-400 font-medium">Date: {activeDay.date}</span>
               <div className="flex justify-between items-center mt-1">
-                <span className="text-xs text-slate-300">Cash in Hand:</span>
-                <span className="text-sm font-bold text-amber-400">{formatINR(activeDay.closingCash)}</span>
+                <span className="text-xs text-slate-600 font-semibold">Cash in Hand:</span>
+                <span className="text-sm font-black text-amber-700">{formatINR(activeDay.closingCash)}</span>
               </div>
               <div className="flex justify-between items-center">
-                <span className="text-xs text-slate-300">Total Profit Today:</span>
-                <span className="text-sm font-bold text-cyan-400">{formatINR(activeDay.totalProfit)}</span>
+                <span className="text-xs text-slate-600 font-semibold">Total Profit Today:</span>
+                <span className="text-sm font-black text-emerald-600">{formatINR(activeDay.totalProfit)}</span>
               </div>
             </div>
-            <div className="flex gap-2">
+            <div className="flex flex-col gap-2">
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={handleWhatsAppShare}
+                  className="flex-1 h-11 bg-emerald-600 hover:bg-emerald-700 active:scale-95 transition-all text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 shadow-xs"
+                >
+                  Share Summary
+                </button>
+                <button
+                  onClick={handleCloseDay}
+                  disabled={isSubmitting}
+                  className="flex-1 h-11 bg-red-600 hover:bg-red-700 active:scale-95 transition-all text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 shadow-xs"
+                >
+                  <Square className="w-4 h-4 fill-current" /> Close Ledger
+                </button>
+              </div>
+
               <button
                 type="button"
-                onClick={handleWhatsAppShare}
-                className="flex-1 h-11 bg-emerald-600 hover:bg-emerald-700 active:scale-95 transition-all text-slate-100 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5"
+                onClick={() => {
+                  const accs = JSON.parse(localStorage.getItem('kiosk_accounts') || '[]');
+                  const totalOnline = accs.reduce((sum, a) => sum + (Number(a.currentBalance) || 0), 0);
+                  setReceiptParams({
+                    dateStr: activeDay?.date || todayStr,
+                    totalCash: activeDay?.closingCash || 0,
+                    denominations: activeDay?.cashDenominations || {},
+                    onlineAmount: totalOnline,
+                    accountName: 'SBI Kiosk Cash Calculation',
+                    bankAccounts: getBankAccountsSnapshot()
+                  });
+                  setShowReceiptModal(true);
+                }}
+                className="w-full h-10 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all shadow-xs"
               >
-                Share Summary
-              </button>
-              <button
-                onClick={handleCloseDay}
-                disabled={isSubmitting}
-                className="flex-1 h-11 bg-red-650 hover:bg-red-700 active:scale-95 transition-all text-slate-100 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5"
-              >
-                <Square className="w-4 h-4 fill-current text-slate-205" /> Close Ledger
+                <FileText className="w-4 h-4 text-blue-600" /> View Cash & Online Receipt
               </button>
             </div>
           </div>
         ) : (
           <div className="flex flex-col gap-4">
             {todayClosedLedger && (
-              <div className="flex flex-col gap-3 bg-slate-950/40 border border-slate-850 p-4 rounded-xl text-left">
-                <div className="flex justify-between items-center text-xs border-b border-slate-900 pb-1.5">
-                  <span className="text-slate-400 font-bold uppercase text-[9px] tracking-wider">Today's Session Summary</span>
-                  <span className="px-2 py-0.5 bg-red-500/10 border border-red-500/20 text-red-400 rounded-md font-bold text-[8px] uppercase">Closed</span>
+              <div className="flex flex-col gap-3 bg-slate-50 border border-slate-200 p-4 rounded-xl text-left shadow-2xs">
+                <div className="flex justify-between items-center text-xs border-b border-slate-200 pb-1.5">
+                  <span className="text-slate-600 font-bold uppercase text-[9px] tracking-wider">Today's Session Summary</span>
+                  <span className="px-2 py-0.5 bg-red-50 border border-red-200 text-red-700 rounded-md font-bold text-[8px] uppercase">Closed</span>
                 </div>
                 <div className="flex justify-between items-center text-xs mt-1">
-                  <span className="text-slate-500">Cash Left in Drawer:</span>
-                  <span className="font-bold text-slate-100">{formatINR(todayClosedLedger.closingCash)}</span>
+                  <span className="text-slate-500 font-medium">Cash Left in Drawer:</span>
+                  <span className="font-black text-slate-800">{formatINR(todayClosedLedger.closingCash)}</span>
                 </div>
                 <div className="flex justify-between items-center text-xs">
-                  <span className="text-slate-500">Net Profit Earned:</span>
-                  <span className="font-bold text-emerald-400">{formatINR(todayClosedLedger.totalProfit)}</span>
+                  <span className="text-slate-500 font-medium">Net Profit Earned:</span>
+                  <span className="font-black text-emerald-600">{formatINR(todayClosedLedger.totalProfit)}</span>
                 </div>
-                <button
-                  type="button"
-                  onClick={handleReopen}
-                  disabled={isSubmitting}
-                  className="w-full h-10 mt-1.5 bg-amber-500 hover:bg-amber-600 active:scale-95 transition-all text-slate-950 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5"
-                >
-                  <RefreshCcw className="w-4 h-4 text-slate-950" /> Reopen Today's Ledger
-                </button>
-                <div className="border-t border-slate-900 my-1"></div>
+                <div className="flex gap-2 mt-1.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const accs = JSON.parse(localStorage.getItem('kiosk_accounts') || '[]');
+                      const totalOnline = accs.reduce((sum, a) => sum + (Number(a.currentBalance) || 0), 0);
+                      setReceiptParams({
+                        dateStr: todayClosedLedger.date,
+                        totalCash: todayClosedLedger.closingCash,
+                        denominations: todayClosedLedger.cashDenominations || {},
+                        onlineAmount: totalOnline,
+                        accountName: 'SBI Kiosk Cash Calculation',
+                        bankAccounts: todayClosedLedger.bankBalances || getBankAccountsSnapshot()
+                      });
+                      setShowReceiptModal(true);
+                    }}
+                    className="flex-1 h-10 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-xl text-xs font-bold flex items-center justify-center gap-1 shadow-xs"
+                  >
+                    <FileText className="w-3.5 h-3.5 text-blue-600" /> View Receipt
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleReopen}
+                    disabled={isSubmitting}
+                    className="flex-1 h-10 bg-amber-500 hover:bg-amber-600 active:scale-95 transition-all text-slate-950 rounded-xl text-xs font-bold flex items-center justify-center gap-1 shadow-xs"
+                  >
+                    <RefreshCcw className="w-3.5 h-3.5" /> Reopen
+                  </button>
+                </div>
               </div>
             )}
 
             <form onSubmit={handleOpenDay} className="flex flex-col gap-3">
               <div className="flex flex-col gap-1.5 text-left">
                 <div className="flex justify-between items-center">
-                  <label className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Open New Session / Ledger</label>
+                  <label className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Open New Session / Ledger</label>
                   <button
                     type="button"
                     onClick={() => setShowDenomModal(true)}
-                    className="text-[10px] font-bold text-amber-400 hover:text-amber-300 flex items-center gap-1"
+                    className="text-[10px] font-bold text-blue-600 hover:text-blue-800 flex items-center gap-1"
                   >
                     <Calculator className="w-3 h-3" /> Note Counter
                   </button>
@@ -594,12 +677,12 @@ _Sent from Kiosk Ledger PWA_`;
                     placeholder="Opening Cash (₹)"
                     value={openingCash}
                     onChange={(e) => setOpeningCash(e.target.value.replace(/[^0-9]/g, ''))}
-                    className="flex-1 h-10 px-3 text-xs bg-slate-950 border border-slate-800 focus:border-amber-500 focus:outline-none rounded-xl text-slate-100 font-bold"
+                    className="flex-1 h-10 px-3 text-xs bg-slate-50 border border-slate-300 focus:border-blue-600 focus:outline-none rounded-xl text-slate-900 font-bold shadow-xs"
                   />
                   <button
                     type="button"
                     onClick={() => setShowDenomModal(true)}
-                    className="h-10 px-3 bg-slate-800 hover:bg-slate-700 text-amber-400 border border-slate-700 text-xs font-bold rounded-xl flex items-center gap-1 transition-all shrink-0"
+                    className="h-10 px-3 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 text-xs font-bold rounded-xl flex items-center gap-1 transition-all shrink-0 shadow-xs"
                   >
                     <Calculator className="w-3.5 h-3.5" /> Count Notes
                   </button>
@@ -608,7 +691,7 @@ _Sent from Kiosk Ledger PWA_`;
                   <button
                     type="button"
                     onClick={() => setOpeningCash(String(lastClosingCash))}
-                    className="text-[9px] text-amber-500 font-bold hover:text-amber-400 select-none text-left w-fit mt-1 flex items-center gap-1"
+                    className="text-[9px] text-blue-600 font-bold hover:underline select-none text-left w-fit mt-1 flex items-center gap-1"
                   >
                     ⚡ Carry Forward Previous Cash: {formatINR(lastClosingCash)}
                   </button>
@@ -617,7 +700,7 @@ _Sent from Kiosk Ledger PWA_`;
               <button
                 type="submit"
                 disabled={isSubmitting}
-                className="w-full h-11 bg-emerald-600 hover:bg-emerald-700 active:scale-95 transition-all text-slate-100 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5"
+                className="w-full h-11 bg-blue-600 hover:bg-blue-700 active:scale-95 transition-all text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 shadow-xs"
               >
                 <Play className="w-4 h-4 fill-current" /> Open Daily Ledger
               </button>
@@ -633,47 +716,36 @@ _Sent from Kiosk Ledger PWA_`;
               }}
               title="Opening Physical Cash Notes"
             />
-            
-            <DenominationModal
-              isOpen={showCloseDenomModal}
-              onClose={() => setShowCloseDenomModal(false)}
-              initialDenominations={closeDenoms}
-              onSave={(totalCash, denoms) => {
-                setCloseDenoms(denoms);
-                executeCloseDay(totalCash, denoms);
-              }}
-              title="Closing Physical Cash Notes"
-            />
           </div>
         )}
       </div>
 
       {/* Backup and CSV Export */}
-      <div className="bg-slate-900/40 border border-slate-800 rounded-2xl p-4 flex flex-col gap-3">
-        <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
-          <Download className="w-3.5 h-3.5 text-slate-400" /> Database Backup & Export
+      <div className="bg-white border border-slate-200 rounded-2xl p-4 flex flex-col gap-3 shadow-sm text-left">
+        <h3 className="text-xs font-bold uppercase tracking-wider text-slate-600 flex items-center gap-1.5">
+          <Download className="w-3.5 h-3.5 text-blue-600" /> Database Backup & Export
         </h3>
 
         {/* Date selection filters */}
-        <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-850 flex flex-col gap-2">
-          <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wide">Filter Statement Dates</span>
+        <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 flex flex-col gap-2 shadow-2xs">
+          <span className="text-[10px] text-slate-600 font-bold uppercase tracking-wide">Filter Statement Dates</span>
           <div className="grid grid-cols-2 gap-2">
             <div className="flex flex-col gap-1">
-              <span className="text-[8px] text-slate-500">Start Date</span>
+              <span className="text-[8px] text-slate-500 font-medium">Start Date</span>
               <input
                 type="date"
                 value={startDate}
                 onChange={(e) => setStartDate(e.target.value)}
-                className="h-8 px-2 bg-slate-900 border border-slate-800 rounded-lg text-[10px] font-bold text-slate-100 focus:outline-none"
+                className="h-8 px-2 bg-white border border-slate-300 rounded-lg text-[10px] font-bold text-slate-800 focus:outline-none shadow-xs"
               />
             </div>
             <div className="flex flex-col gap-1">
-              <span className="text-[8px] text-slate-500">End Date</span>
+              <span className="text-[8px] text-slate-500 font-medium">End Date</span>
               <input
                 type="date"
                 value={endDate}
                 onChange={(e) => setEndDate(e.target.value)}
-                className="h-8 px-2 bg-slate-900 border border-slate-800 rounded-lg text-[10px] font-bold text-slate-100 focus:outline-none"
+                className="h-8 px-2 bg-white border border-slate-300 rounded-lg text-[10px] font-bold text-slate-800 focus:outline-none shadow-xs"
               />
             </div>
           </div>
@@ -681,7 +753,7 @@ _Sent from Kiosk Ledger PWA_`;
             <button
               type="button"
               onClick={() => { setStartDate(''); setEndDate(''); }}
-              className="text-[9px] text-amber-500 font-bold text-right hover:text-amber-400 mt-1"
+              className="text-[9px] text-blue-600 font-bold text-right hover:underline mt-1"
             >
               Clear Date Filter
             </button>
@@ -692,40 +764,39 @@ _Sent from Kiosk Ledger PWA_`;
           {/* CSV Download */}
           <button
             onClick={() => downloadFile('export-csv', 'kiosk_transactions.csv')}
-            className="w-full h-10 bg-slate-800 border border-slate-700 text-slate-200 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 hover:bg-slate-750 active:scale-95 transition-all"
+            className="w-full h-10 bg-slate-50 border border-slate-200 text-slate-700 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 hover:bg-slate-100 active:scale-95 transition-all shadow-xs"
           >
-            <Download className="w-4 h-4 text-emerald-400" /> Download Transactions CSV
+            <Download className="w-4 h-4 text-emerald-600" /> Download Transactions CSV
           </button>
 
           {/* Encrypted BIN Download */}
           <button
             onClick={() => downloadFile('export', 'kiosk_backup_encrypted.bin')}
-            className="w-full h-10 bg-slate-800 border border-slate-700 text-slate-200 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 hover:bg-slate-750 active:scale-95 transition-all"
+            className="w-full h-10 bg-slate-50 border border-slate-200 text-slate-700 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 hover:bg-slate-100 active:scale-95 transition-all shadow-xs"
           >
-            <Download className="w-4 h-4 text-amber-400" /> Download Encrypted Bin Backup
+            <Download className="w-4 h-4 text-blue-600" /> Download Encrypted Bin Backup
           </button>
-
         </div>
       </div>
 
       {/* App Permissions & Notifications */}
-      <div className="bg-slate-900/40 border border-slate-800 rounded-2xl p-4 flex flex-col gap-3">
-        <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5 text-left">
-          <ShieldAlert className="w-3.5 h-3.5 text-slate-400" /> System Permissions
+      <div className="bg-white border border-slate-200 rounded-2xl p-4 flex flex-col gap-3 shadow-sm">
+        <h3 className="text-xs font-bold uppercase tracking-wider text-slate-600 flex items-center gap-1.5 text-left">
+          <ShieldAlert className="w-3.5 h-3.5 text-blue-600" /> System Permissions
         </h3>
         
-        <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-850 flex items-center justify-between">
+        <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 flex items-center justify-between shadow-2xs">
           <div className="flex flex-col gap-0.5 text-left">
-            <span className="text-xs font-bold text-slate-100">Desktop Notifications</span>
+            <span className="text-xs font-bold text-slate-800">Desktop Notifications</span>
             <span className="text-[9px] text-slate-500">Alerts for completed transfers and ledger closures</span>
           </div>
           
           {notificationPermission === 'granted' ? (
-            <span className="px-2 py-1 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 rounded-lg text-[9px] font-bold uppercase">Activated</span>
+            <span className="px-2 py-1 bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-lg text-[9px] font-bold uppercase">Activated</span>
           ) : (
             <button
               onClick={requestNotificationPermission}
-              className="px-3 h-8 bg-amber-500 hover:bg-amber-600 text-slate-950 rounded-lg text-[10px] font-bold transition-all"
+              className="px-3 h-8 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-[10px] font-bold transition-all shadow-xs"
             >
               Grant Permission
             </button>
@@ -734,17 +805,17 @@ _Sent from Kiosk Ledger PWA_`;
       </div>
 
       {/* Database Import */}
-      <div className="bg-slate-900/40 border border-slate-800 rounded-2xl p-4 flex flex-col gap-3">
-        <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
-          <Upload className="w-3.5 h-3.5 text-slate-400" /> Restore Database
+      <div className="bg-white border border-slate-200 rounded-2xl p-4 flex flex-col gap-3 shadow-sm text-left">
+        <h3 className="text-xs font-bold uppercase tracking-wider text-slate-600 flex items-center gap-1.5">
+          <Upload className="w-3.5 h-3.5 text-blue-600" /> Restore Database
         </h3>
         <p className="text-[10px] text-slate-500 leading-relaxed">
           Restore data from a previously downloaded `.bin` backup file. This replaces all accounts and ledger history.
         </p>
         
-        <label className="w-full h-10 bg-slate-800 border border-dashed border-slate-750 rounded-xl flex items-center justify-center gap-2 cursor-pointer hover:bg-slate-750 transition-all">
-          <Upload className="w-4 h-4 text-slate-400" />
-          <span className="text-xs font-semibold text-slate-300">
+        <label className="w-full h-10 bg-slate-50 border border-dashed border-slate-300 rounded-xl flex items-center justify-center gap-2 cursor-pointer hover:bg-slate-100 transition-all shadow-2xs">
+          <Upload className="w-4 h-4 text-slate-500" />
+          <span className="text-xs font-semibold text-slate-700">
             {importing ? 'Restoring Ledger...' : 'Choose .bin Backup File'}
           </span>
           <input
@@ -758,19 +829,19 @@ _Sent from Kiosk Ledger PWA_`;
       </div>
 
       {/* Biometric Security Control Panel */}
-      <div className="bg-slate-900/40 border border-slate-800 rounded-2xl p-4 flex flex-col gap-3">
+      <div className="bg-white border border-slate-200 rounded-2xl p-4 flex flex-col gap-3 shadow-sm text-left">
         <div className="flex justify-between items-center">
-          <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
-            <Fingerprint className="w-3.5 h-3.5 text-amber-400" /> Biometric Fingerprint Login
+          <h3 className="text-xs font-bold uppercase tracking-wider text-slate-600 flex items-center gap-1.5">
+            <Fingerprint className="w-3.5 h-3.5 text-blue-600" /> Biometric Fingerprint Login
           </h3>
           <span className={`px-2 py-0.5 rounded text-[8px] font-bold uppercase tracking-wider ${
-            bioActive ? 'bg-emerald-500/10 border border-emerald-500/20 text-emerald-400' : 'bg-slate-800 text-slate-400'
+            bioActive ? 'bg-emerald-50 border border-emerald-200 text-emerald-700' : 'bg-slate-100 text-slate-500'
           }`}>
             {bioActive ? 'ACTIVE (Fingerprint Primary)' : 'DISABLED (PIN Only)'}
           </span>
         </div>
 
-        <p className="text-[11px] text-slate-400 leading-relaxed">
+        <p className="text-[11px] text-slate-500 leading-relaxed">
           {bioActive
             ? 'Fingerprint biometrics are set as your PRIMARY login mode on refresh/load, with 4-Digit PIN as secondary backup.'
             : 'Enable fingerprint scanner or Windows Hello / FaceID to automatically authenticate on app launch.'}
@@ -780,8 +851,8 @@ _Sent from Kiosk Ledger PWA_`;
           onClick={toggleBiometrics}
           className={`w-full h-11 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all active:scale-[0.98] ${
             bioActive
-              ? 'bg-slate-900 border border-slate-800 text-slate-300 hover:text-white'
-              : 'bg-amber-400 hover:bg-amber-500 text-slate-950 shadow-lg'
+              ? 'bg-slate-100 border border-slate-200 text-slate-700 hover:bg-slate-200'
+              : 'bg-blue-600 hover:bg-blue-700 text-white shadow-xs'
           }`}
         >
           <Fingerprint className="w-4 h-4" />
@@ -790,8 +861,8 @@ _Sent from Kiosk Ledger PWA_`;
       </div>
 
       {/* Security Actions & Demos */}
-      <div className="bg-slate-900/40 border border-slate-800 rounded-2xl p-4 flex flex-col gap-3">
-        <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
+      <div className="bg-white border border-slate-200 rounded-2xl p-4 flex flex-col gap-3 shadow-sm text-left">
+        <h3 className="text-xs font-bold uppercase tracking-wider text-slate-600 flex items-center gap-1.5">
           <ShieldAlert className="w-3.5 h-3.5 text-slate-400" /> Access & System Actions
         </h3>
         
@@ -800,33 +871,60 @@ _Sent from Kiosk Ledger PWA_`;
           <button
             onClick={seedDemoData}
             disabled={isSubmitting}
-            className="w-full h-10 bg-slate-900 border border-slate-800 text-slate-300 hover:text-white rounded-xl text-xs font-medium flex items-center justify-center gap-2 hover:bg-slate-800 active:scale-95 transition-all"
+            className="w-full h-10 bg-slate-50 border border-slate-200 text-slate-700 hover:bg-slate-100 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 active:scale-95 transition-all shadow-xs"
           >
-            <Sparkles className="w-4 h-4 text-amber-400" /> Seed Dummy Bank Accounts
+            <Sparkles className="w-4 h-4 text-blue-600" /> Seed Dummy Bank Accounts
           </button>
 
           {/* Reset PIN */}
           <button
             onClick={handleResetPin}
-            className="w-full h-10 bg-slate-900 border border-slate-800 text-red-400 hover:text-red-300 rounded-xl text-xs font-medium flex items-center justify-center gap-2 hover:bg-slate-800 active:scale-95 transition-all"
+            className="w-full h-10 bg-rose-50 border border-rose-200 text-rose-700 hover:bg-rose-100 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 active:scale-95 transition-all shadow-xs"
           >
-            <RefreshCw className="w-4 h-4" /> Reset Security PIN Passcode
+            <RefreshCw className="w-4 h-4 text-rose-600" /> Reset Security PIN Passcode
           </button>
         </div>
       </div>
 
       {/* Notifications */}
       {actionError && (
-        <div className="text-xs font-semibold text-red-400 bg-red-500/5 border border-red-500/10 rounded-xl p-3 flex items-center gap-2">
-          <AlertCircle className="w-4 h-4 shrink-0" />
+        <div className="text-xs font-semibold text-red-700 bg-red-50 border border-red-200 rounded-xl p-3 flex items-center gap-2">
+          <AlertCircle className="w-4 h-4 shrink-0 text-red-600" />
           <span>{actionError}</span>
         </div>
       )}
       {actionSuccess && (
-        <div className="text-xs font-semibold text-emerald-400 bg-emerald-500/5 border border-emerald-500/10 rounded-xl p-3 flex items-center gap-2">
-          <AlertCircle className="w-4 h-4 shrink-0" />
+        <div className="text-xs font-semibold text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-xl p-3 flex items-center gap-2">
+          <AlertCircle className="w-4 h-4 shrink-0 text-emerald-600" />
           <span>{actionSuccess}</span>
         </div>
+      )}
+
+      {/* Closing Day Physical Cash Denomination Modal */}
+      <DenominationModal
+        isOpen={showCloseDenomModal}
+        onClose={() => setShowCloseDenomModal(false)}
+        initialDenominations={closeDenoms}
+        onSave={(totalCash, denoms) => {
+          setCloseDenoms(denoms);
+          executeCloseDay(totalCash, denoms);
+        }}
+        title="Closing Physical Cash Notes"
+      />
+
+      {/* Cash Statement Receipt Modal */}
+      {receiptParams && (
+        <CashStatementReceipt
+          isOpen={showReceiptModal}
+          onClose={() => setShowReceiptModal(false)}
+          dateStr={receiptParams.dateStr}
+          accountName={receiptParams.accountName}
+          denominations={receiptParams.denominations}
+          totalCash={receiptParams.totalCash}
+          onlineAmount={receiptParams.onlineAmount}
+          bankAccounts={receiptParams.bankAccounts || getBankAccountsSnapshot()}
+          kioskTitle="SBI Kiosk"
+        />
       )}
     </div>
   );

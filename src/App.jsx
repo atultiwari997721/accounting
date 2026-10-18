@@ -130,6 +130,19 @@ export default function App() {
     day.closingCash -= txData.cashOut;
     day.totalProfit += txData.profit;
 
+    // If specific notes were given or received, sync with drawer denominations
+    if (txData.notesBreakdown && day.cashDenominations) {
+      if (txData.notesDirection === 'deducted') {
+        Object.keys(txData.notesBreakdown).forEach(k => {
+          day.cashDenominations[k] = Math.max(0, (Number(day.cashDenominations[k]) || 0) - (Number(txData.notesBreakdown[k]) || 0));
+        });
+      } else if (txData.notesDirection === 'added') {
+        Object.keys(txData.notesBreakdown).forEach(k => {
+          day.cashDenominations[k] = (Number(day.cashDenominations[k]) || 0) + (Number(txData.notesBreakdown[k]) || 0);
+        });
+      }
+    }
+
     const txs = JSON.parse(localStorage.getItem('kiosk_transactions') || '[]');
     const newTx = {
       _id: 'local_tx_' + Math.random().toString(36).substr(2, 9),
@@ -140,6 +153,9 @@ export default function App() {
       profit: txData.profit,
       customerName: txData.customerName || '',
       commissionMode: txData.commissionMode || 'Deducted',
+      noteDetails: txData.noteDetails || 'Skipped (Count at EOD)',
+      notesBreakdown: txData.notesBreakdown || null,
+      notesDirection: txData.notesDirection || null,
       timestamp: new Date().toISOString()
     };
     txs.unshift(newTx);
@@ -166,13 +182,30 @@ export default function App() {
   };
 
   const adjustPhysicalCashLocal = (closingCash, cashDenominations) => {
-    const day = JSON.parse(localStorage.getItem('kiosk_active_day') || 'null');
-    if (!day) return { success: false, error: 'No open ledger day' };
-    day.closingCash = closingCash;
+    let day = JSON.parse(localStorage.getItem('kiosk_active_day') || 'null');
+    const today = new Date().toISOString().split('T')[0];
+    const defaultDenoms = { n500: 0, n200: 0, n100: 0, n50: 0, n20: 0, n10: 0, coins: 0, c20: 0, c10: 0, c5: 0, c2: 0, c1: 0 };
+    
+    if (!day) {
+      day = {
+        date: today,
+        openingCash: Number(closingCash) || 0,
+        closingCash: Number(closingCash) || 0,
+        totalProfit: 0,
+        status: 'Open',
+        cashDenominations: cashDenominations || defaultDenoms
+      };
+      localStorage.setItem('kiosk_active_day', JSON.stringify(day));
+      loadDataLocal();
+      triggerNotification('Ledger Open', `Ledger opened with ₹${(Number(closingCash) || 0).toLocaleString('en-IN')} cash.`);
+      return { success: true, day };
+    }
+    
+    day.closingCash = Number(closingCash) || 0;
     if (cashDenominations) day.cashDenominations = cashDenominations;
     localStorage.setItem('kiosk_active_day', JSON.stringify(day));
     loadDataLocal();
-    return { success: true };
+    return { success: true, day };
   };
 
   // --- Core Action Handlers ---
@@ -230,7 +263,7 @@ export default function App() {
     return { success: true };
   };
 
-  const handleCloseDay = async () => {
+  const handleCloseDay = async (closingCash, cashDenominations) => {
     const buildLocalBalancesSnapshot = () => {
       const accs = JSON.parse(localStorage.getItem('kiosk_accounts') || '[]');
       const bankBals = {};
@@ -242,7 +275,14 @@ export default function App() {
 
     const day = JSON.parse(localStorage.getItem('kiosk_active_day') || 'null');
     if (!day) return { success: false, error: 'No open ledger' };
+    if (typeof closingCash === 'number') {
+      day.closingCash = closingCash;
+    }
+    if (cashDenominations) {
+      day.cashDenominations = cashDenominations;
+    }
     day.status = 'Closed';
+    day.closedAt = new Date().toISOString();
     day.bankBalances = buildLocalBalancesSnapshot();
 
     const history = JSON.parse(localStorage.getItem('kiosk_day_history') || '[]');
@@ -253,7 +293,7 @@ export default function App() {
     localStorage.setItem('kiosk_active_day', 'null');
     loadDataLocal();
     triggerNotification('Ledger Closed', `Ledger closed for ${day.date}. EOD report recorded.`);
-    return { success: true };
+    return { success: true, closedDay: day };
   };
 
   const handleReopenDay = async (date) => {
@@ -279,7 +319,7 @@ export default function App() {
   };
 
   // Safe area helper class for mobile screens
-  const baseWrapperClass = "w-full min-h-screen bg-slate-950 text-slate-100 flex flex-col antialiased select-none pb-[calc(4rem+env(safe-area-inset-bottom))] max-w-md mx-auto border-x border-slate-900 shadow-2xl relative";
+  const baseWrapperClass = "w-full min-h-screen bg-slate-50 text-slate-900 flex flex-col antialiased select-none pb-[calc(4rem+env(safe-area-inset-bottom))] max-w-md mx-auto border-x border-slate-200 shadow-xl relative";
 
   if (isLocked) {
     return <PinLock onUnlock={() => { setIsLocked(false); loadData(); }} />;
@@ -289,16 +329,19 @@ export default function App() {
     <div className={baseWrapperClass}>
       
       {/* Mobile Top App Header */}
-      <header className="sticky top-0 z-40 bg-slate-900/90 backdrop-blur-md border-b border-slate-800/80 h-14 flex items-center justify-between px-4">
-        <div className="flex items-center gap-1.5">
-          <div className="w-2.5 h-2.5 rounded-full bg-amber-500"></div>
-          <h1 className="font-extrabold text-sm tracking-wide text-slate-100 uppercase">Kiosk Ledger</h1>
+      <header className="sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-slate-200 h-14 flex items-center justify-between px-4 shadow-xs">
+        <div className="flex items-center gap-2">
+          <div className="w-3 h-3 rounded-full bg-blue-600 shadow-sm"></div>
+          <div>
+            <h1 className="font-extrabold text-sm tracking-wide text-blue-900 uppercase">SBI Kiosk Ledger</h1>
+            <p className="text-[9px] text-slate-500 font-medium -mt-0.5">Cash & Account System</p>
+          </div>
         </div>
         
         {/* Connection Status Indicator */}
-        <div className="flex items-center gap-1 text-[10px] bg-slate-950 border border-slate-800 text-slate-400 px-2 py-0.5 rounded-full">
-          <ShieldCheck className="w-3.5 h-3.5 text-amber-500" />
-          <span>Local Mode</span>
+        <div className="flex items-center gap-1 text-[10px] bg-blue-50 border border-blue-200 text-blue-700 font-semibold px-2.5 py-0.5 rounded-full shadow-xs">
+          <ShieldCheck className="w-3.5 h-3.5 text-blue-600" />
+          <span>Local Safe</span>
         </div>
       </header>
 
@@ -332,6 +375,9 @@ export default function App() {
             onBulkUpdateBalances={handleBulkUpdateBalances}
             onUpdateCustomerName={handleUpdateCustomerName}
             onSubmitTransaction={handleSubmitTransaction}
+            onAdjustCash={handleAdjustCash}
+            onCloseDay={handleCloseDay}
+            onOpenDay={handleOpenDay}
           />
         )}
         {activeTab === 'settings' && (
@@ -339,6 +385,7 @@ export default function App() {
             activeDay={activeDay}
             dayHistory={dayHistory}
             transactions={transactions}
+            accounts={accounts}
             onOpenDay={handleOpenDay}
             onCloseDay={handleCloseDay}
             onReopenDay={handleReopenDay}
@@ -350,11 +397,11 @@ export default function App() {
       </main>
 
       {/* Bottom Navigation Bar */}
-      <nav className="fixed bottom-0 left-0 right-0 h-16 bg-slate-900 border-t border-slate-800 max-w-md mx-auto z-40 flex items-center justify-around px-2">
+      <nav className="fixed bottom-0 left-0 right-0 h-16 bg-white border-t border-slate-200 max-w-md mx-auto z-40 flex items-center justify-around px-2 shadow-lg">
         <button
           onClick={() => setActiveTab('home')}
           className={`flex flex-col items-center justify-center flex-1 h-full gap-1 transition-all ${
-            activeTab === 'home' ? 'text-amber-400 font-bold scale-105' : 'text-slate-500'
+            activeTab === 'home' ? 'text-blue-600 font-bold scale-105' : 'text-slate-400 hover:text-slate-600'
           }`}
         >
           <Home className="w-5 h-5" />
@@ -364,7 +411,7 @@ export default function App() {
         <button
           onClick={() => setActiveTab('add')}
           className={`flex flex-col items-center justify-center flex-1 h-full gap-1 transition-all ${
-            activeTab === 'add' ? 'text-amber-400 font-bold scale-105' : 'text-slate-500'
+            activeTab === 'add' ? 'text-blue-600 font-bold scale-105' : 'text-slate-400 hover:text-slate-600'
           }`}
         >
           <PlusCircle className="w-5 h-5" />
@@ -374,7 +421,7 @@ export default function App() {
         <button
           onClick={() => setActiveTab('passbook')}
           className={`flex flex-col items-center justify-center flex-1 h-full gap-1 transition-all ${
-            activeTab === 'passbook' ? 'text-amber-400 font-bold scale-105' : 'text-slate-500'
+            activeTab === 'passbook' ? 'text-blue-600 font-bold scale-105' : 'text-slate-400 hover:text-slate-600'
           }`}
         >
           <ClipboardList className="w-5 h-5" />
@@ -384,7 +431,7 @@ export default function App() {
         <button
           onClick={() => setActiveTab('settings')}
           className={`flex flex-col items-center justify-center flex-1 h-full gap-1 transition-all ${
-            activeTab === 'settings' ? 'text-amber-400 font-bold scale-105' : 'text-slate-500'
+            activeTab === 'settings' ? 'text-blue-600 font-bold scale-105' : 'text-slate-400 hover:text-slate-600'
           }`}
         >
           <SettingsIcon className="w-5 h-5" />

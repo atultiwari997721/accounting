@@ -1,5 +1,8 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Landmark, ClipboardList, PlusCircle, CreditCard, ChevronRight, Search, Calendar, Edit3, UserCheck, Calculator, Coins, IndianRupee, ArrowDownRight, ArrowUpRight, CheckCircle2, UserX } from 'lucide-react';
+import { Landmark, ClipboardList, PlusCircle, CreditCard, ChevronRight, Search, Calendar, Edit3, UserCheck, Calculator, Coins, IndianRupee, ArrowDownRight, ArrowUpRight, CheckCircle2, UserX, FileText, Square, RotateCcw, Check, Play, AlertTriangle } from 'lucide-react';
+import DenominationModal from './DenominationModal';
+import CashStatementReceipt from './CashStatementReceipt';
+import { numberToIndianWords } from '../utils/numberToWords';
 
 export default function PassbookAccounts({ 
   accounts, 
@@ -9,9 +12,12 @@ export default function PassbookAccounts({
   onAddAccount, 
   onBulkUpdateBalances, 
   onUpdateCustomerName,
-  onSubmitTransaction
+  onSubmitTransaction,
+  onAdjustCash,
+  onCloseDay,
+  onOpenDay
 }) {
-  const [activeSubTab, setActiveSubTab] = useState('passbook'); // 'passbook' | 'udhar_jama' | 'accounts' | 'reports'
+  const [activeSubTab, setActiveSubTab] = useState('passbook'); // 'passbook' | 'cash_counter' | 'receipt' | 'udhar_jama' | 'accounts' | 'reports'
   const [bankName, setBankName] = useState('');
   const [initialBalance, setInitialBalance] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
@@ -22,11 +28,37 @@ export default function PassbookAccounts({
   const [searchTerm, setSearchTerm] = useState('');
   const [filterType, setFilterType] = useState('all'); // 'all' | 'credit' | 'debit' | 'udhar' | 'jama'
 
+  // Cash addition & note counter state
+  const [cashNotes, setCashNotes] = useState({
+    n500: 0,
+    n200: 0,
+    n100: 0,
+    n50: 0,
+    n20: 0,
+    n10: 0,
+    coins: 0,
+    c20: 0,
+    c10: 0,
+    c5: 0,
+    c2: 0,
+    c1: 0
+  });
+
+  // Cash addition & receipt modal states
+  const [showDenomModal, setShowDenomModal] = useState(false);
+  const [showCloseDenomModal, setShowCloseDenomModal] = useState(false);
+  const [showReceiptModal, setShowReceiptModal] = useState(false);
+  const [receiptParams, setReceiptParams] = useState(null);
+  const [closeDenoms, setCloseDenoms] = useState({ n500: 0, n200: 0, n100: 0, n50: 0, n20: 0, n10: 0, coins: 0, c20: 0, c10: 0, c5: 0, c2: 0, c1: 0 });
+
   // Settlement Modal state for Udhar payment
   const [settleCustomer, setSettleCustomer] = useState(null);
   const [settleAmount, setSettleAmount] = useState('');
   const [settleMethod, setSettleMethod] = useState('cash'); // 'cash' | 'bank'
   const [settleBankId, setSettleBankId] = useState('');
+
+  // EOD History expandable transactions state
+  const [expandedDays, setExpandedDays] = useState({});
 
   const [editableBalances, setEditableBalances] = useState({});
 
@@ -210,46 +242,210 @@ export default function PassbookAccounts({
     }
   };
 
+  useEffect(() => {
+    if (activeDay?.cashDenominations) {
+      setCashNotes({
+        n500: Number(activeDay.cashDenominations.n500) || 0,
+        n200: Number(activeDay.cashDenominations.n200) || 0,
+        n100: Number(activeDay.cashDenominations.n100) || 0,
+        n50: Number(activeDay.cashDenominations.n50) || 0,
+        n20: Number(activeDay.cashDenominations.n20) || 0,
+        n10: Number(activeDay.cashDenominations.n10) || 0,
+        coins: Number(activeDay.cashDenominations.coins) || 0,
+        c20: Number(activeDay.cashDenominations.c20) || 0,
+        c10: Number(activeDay.cashDenominations.c10) || 0,
+        c5: Number(activeDay.cashDenominations.c5) || 0,
+        c2: Number(activeDay.cashDenominations.c2) || 0,
+        c1: Number(activeDay.cashDenominations.c1) || 0
+      });
+    }
+  }, [activeDay]);
+
+  const calculateCashNotesTotal = (notes) => {
+    return (
+      (Number(notes.n500) || 0) * 500 +
+      (Number(notes.n200) || 0) * 200 +
+      (Number(notes.n100) || 0) * 100 +
+      (Number(notes.n50) || 0) * 50 +
+      (Number(notes.n20) || 0) * 20 +
+      (Number(notes.n10) || 0) * 10 +
+      (Number(notes.c20) || 0) * 20 +
+      (Number(notes.c10) || 0) * 10 +
+      (Number(notes.c5) || 0) * 5 +
+      (Number(notes.c2) || 0) * 2 +
+      (Number(notes.c1) || 0) * 1 +
+      (Number(notes.coins) || 0)
+    );
+  };
+
+  const handleCashNoteChange = (field, val) => {
+    const num = Math.max(0, parseInt(val.replace(/[^0-9]/g, ''), 10) || 0);
+    setCashNotes(prev => ({ ...prev, [field]: num }));
+  };
+
+  const handleCashNoteAdjust = (field, delta) => {
+    setCashNotes(prev => ({ ...prev, [field]: Math.max(0, (Number(prev[field]) || 0) + delta) }));
+  };
+
+  const handleSaveDenoms = async (totalCash, denomsPayload) => {
+    setErrorMsg('');
+    setSuccessMsg('');
+    setIsSubmitting(true);
+    try {
+      if (onAdjustCash) {
+        const res = await onAdjustCash(totalCash, denomsPayload);
+        if (res && res.success) {
+          setSuccessMsg(`Physical Cash updated to ${formatINR(totalCash)}! Denominations applied.`);
+          setCashNotes({ ...denomsPayload });
+        } else {
+          setErrorMsg(res?.error || 'Failed to adjust physical cash.');
+        }
+      }
+    } catch (e) {
+      setErrorMsg('Error saving physical cash.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const getLiveBankAccountsList = () => {
+    return accounts.map(a => ({
+      id: a._id,
+      name: a.bankName,
+      balance: Number(editableBalances[a._id] !== undefined ? editableBalances[a._id] : a.currentBalance) || 0
+    }));
+  };
+
+  const handleOpenCurrentReceipt = () => {
+    setReceiptParams({
+      dateStr: activeDay?.date || new Date().toISOString().split('T')[0],
+      totalCash: activeDay ? activeDay.closingCash : calculateCashNotesTotal(cashNotes),
+      denominations: denoms,
+      onlineAmount: liveTotalBankMoney,
+      accountName: 'SBI Kiosk Cash Calculation',
+      bankAccounts: getLiveBankAccountsList()
+    });
+    setShowReceiptModal(true);
+  };
+
+  const handleCloseLedgerFromPassbook = () => {
+    if (!window.confirm('Are you sure you want to CLOSE the ledger session for today?')) return;
+    setCloseDenoms({
+      n500: Number(denoms.n500) || 0,
+      n200: Number(denoms.n200) || 0,
+      n100: Number(denoms.n100) || 0,
+      n50: Number(denoms.n50) || 0,
+      n20: Number(denoms.n20) || 0,
+      n10: Number(denoms.n10) || 0,
+      coins: Number(denoms.coins) || 0,
+      c20: Number(denoms.c20) || 0,
+      c10: Number(denoms.c10) || 0,
+      c5: Number(denoms.c5) || 0,
+      c2: Number(denoms.c2) || 0,
+      c1: Number(denoms.c1) || 0
+    });
+    setShowCloseDenomModal(true);
+  };
+
+  const executeCloseFromPassbook = async (totalCash, closingDenomsPayload) => {
+    setErrorMsg('');
+    setSuccessMsg('');
+    setIsSubmitting(true);
+    if (onAdjustCash) {
+      await onAdjustCash(totalCash, closingDenomsPayload);
+    }
+    if (onCloseDay) {
+      const res = await onCloseDay(totalCash, closingDenomsPayload);
+      if (res && res.success) {
+        setSuccessMsg('Business Day Ledger closed successfully! Cash Statement Receipt generated.');
+        setReceiptParams({
+          dateStr: activeDay?.date || new Date().toISOString().split('T')[0],
+          totalCash: totalCash,
+          denominations: closingDenomsPayload,
+          onlineAmount: liveTotalBankMoney,
+          accountName: 'SBI Kiosk Cash Calculation',
+          bankAccounts: getLiveBankAccountsList()
+        });
+        setShowReceiptModal(true);
+      } else {
+        setErrorMsg(res?.error || 'Failed to close ledger.');
+      }
+    }
+    setIsSubmitting(false);
+  };
+
   return (
     <div className="flex flex-col gap-4 px-4 pt-4 select-none">
-      {/* Sub tabs header */}
-      <div className="bg-slate-900/60 p-1 rounded-xl border border-slate-800 flex gap-1">
+      {/* Sub tabs header with dedicated Cash & Receipt shortcuts */}
+      <div className="bg-slate-200/70 p-1 rounded-xl border border-slate-200 flex gap-1 overflow-x-auto no-scrollbar">
         <button
           onClick={() => { setActiveSubTab('passbook'); setErrorMsg(''); setSuccessMsg(''); }}
-          className={`flex-1 py-2 text-[11px] font-bold rounded-lg flex items-center justify-center gap-1 transition-all ${
+          className={`px-3 py-2 text-[11px] font-bold rounded-lg flex items-center justify-center gap-1 shrink-0 transition-all ${
             activeSubTab === 'passbook'
-              ? 'bg-slate-800 text-amber-400'
-              : 'text-slate-400 hover:text-slate-200'
+              ? 'bg-blue-600 text-white shadow-xs'
+              : 'text-slate-600 hover:text-slate-900'
           }`}
         >
           <ClipboardList className="w-3.5 h-3.5" /> Passbook & EOD
         </button>
         <button
+          onClick={() => { setActiveSubTab('cash_counter'); setErrorMsg(''); setSuccessMsg(''); }}
+          className={`px-3 py-2 text-[11px] font-bold rounded-lg flex items-center justify-center gap-1 shrink-0 transition-all ${
+            activeSubTab === 'cash_counter'
+              ? 'bg-amber-500 text-slate-950 font-black shadow-xs'
+              : 'bg-amber-50 text-amber-800 border border-amber-200 hover:bg-amber-100'
+          }`}
+        >
+          <Calculator className="w-3.5 h-3.5" /> 💵 Cash Counter
+        </button>
+        <button
+          onClick={() => { 
+            setActiveSubTab('receipt'); 
+            setErrorMsg(''); 
+            setSuccessMsg('');
+            setReceiptParams({
+              dateStr: activeDay?.date || new Date().toISOString().split('T')[0],
+              totalCash: activeDay ? activeDay.closingCash : calculateCashNotesTotal(cashNotes),
+              denominations: activeDay?.cashDenominations || cashNotes,
+              onlineAmount: liveTotalBankMoney,
+              accountName: 'SBI Kiosk Cash Calculation',
+              bankAccounts: getLiveBankAccountsList()
+            });
+          }}
+          className={`px-3 py-2 text-[11px] font-bold rounded-lg flex items-center justify-center gap-1 shrink-0 transition-all ${
+            activeSubTab === 'receipt'
+              ? 'bg-blue-700 text-white font-black shadow-xs'
+              : 'text-slate-600 hover:text-slate-900'
+          }`}
+        >
+          <FileText className="w-3.5 h-3.5" /> 📄 Statement Receipt
+        </button>
+        <button
           onClick={() => { setActiveSubTab('udhar_jama'); setErrorMsg(''); setSuccessMsg(''); }}
-          className={`flex-1 py-2 text-[11px] font-bold rounded-lg flex items-center justify-center gap-1 transition-all ${
+          className={`px-3 py-2 text-[11px] font-bold rounded-lg flex items-center justify-center gap-1 shrink-0 transition-all ${
             activeSubTab === 'udhar_jama'
-              ? 'bg-slate-800 text-amber-400'
-              : 'text-slate-400 hover:text-slate-200'
+              ? 'bg-blue-600 text-white shadow-xs'
+              : 'text-slate-600 hover:text-slate-900'
           }`}
         >
           <UserCheck className="w-3.5 h-3.5" /> Udhar & Jama
         </button>
         <button
           onClick={() => { setActiveSubTab('accounts'); setErrorMsg(''); setSuccessMsg(''); }}
-          className={`flex-1 py-2 text-[11px] font-bold rounded-lg flex items-center justify-center gap-1 transition-all ${
+          className={`px-3 py-2 text-[11px] font-bold rounded-lg flex items-center justify-center gap-1 shrink-0 transition-all ${
             activeSubTab === 'accounts'
-              ? 'bg-slate-800 text-amber-400'
-              : 'text-slate-400 hover:text-slate-200'
+              ? 'bg-blue-600 text-white shadow-xs'
+              : 'text-slate-600 hover:text-slate-900'
           }`}
         >
           <Landmark className="w-3.5 h-3.5" /> Accounts
         </button>
         <button
           onClick={() => { setActiveSubTab('reports'); setErrorMsg(''); setSuccessMsg(''); }}
-          className={`flex-1 py-2 text-[11px] font-bold rounded-lg flex items-center justify-center gap-1 transition-all ${
+          className={`px-3 py-2 text-[11px] font-bold rounded-lg flex items-center justify-center gap-1 shrink-0 transition-all ${
             activeSubTab === 'reports'
-              ? 'bg-slate-800 text-amber-400'
-              : 'text-slate-400 hover:text-slate-200'
+              ? 'bg-blue-600 text-white shadow-xs'
+              : 'text-slate-600 hover:text-slate-900'
           }`}
         >
           <Calendar className="w-3.5 h-3.5" /> EOD History
@@ -258,90 +454,146 @@ export default function PassbookAccounts({
 
       {activeSubTab === 'passbook' && (
         <div className="flex flex-col gap-4">
+          {!activeDay && (
+            <div className="bg-amber-50 border border-amber-200 rounded-2xl p-3.5 flex flex-col gap-2 text-left shadow-xs">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 text-amber-800">
+                  <AlertTriangle className="w-4 h-4 shrink-0 text-amber-600" />
+                  <span className="font-extrabold text-xs uppercase tracking-wide">Daily Ledger is Currently Closed</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const total = calculateCashNotesTotal(cashNotes);
+                    handleSaveDenoms(total, cashNotes);
+                  }}
+                  className="px-3 py-1 bg-amber-500 hover:bg-amber-400 active:scale-95 text-slate-950 rounded-lg text-xs font-black flex items-center gap-1 shadow-xs transition-all"
+                >
+                  <Play className="w-3.5 h-3.5 fill-current" /> Open Session
+                </button>
+              </div>
+              <p className="text-[10px] text-amber-700/80">
+                Opening cash will be set from your notes. You can also count cash in the <button type="button" onClick={() => setActiveSubTab('cash_counter')} className="text-amber-900 font-bold underline">Cash Counter</button> tab.
+              </p>
+            </div>
+          )}
           
           {/* All Details At One Place Summary Card */}
-          <div className="bg-gradient-to-br from-slate-900 via-slate-900/95 to-slate-950 border border-slate-800 rounded-2xl p-4 flex flex-col gap-3.5 shadow-xl">
-            <div className="flex justify-between items-center border-b border-slate-800/80 pb-2">
+          <div className="bg-white border border-slate-200 rounded-2xl p-4 flex flex-col gap-3.5 shadow-sm">
+            <div className="flex justify-between items-center border-b border-slate-100 pb-2">
               <div className="flex items-center gap-2">
-                <div className="p-2 bg-amber-500/10 rounded-xl border border-amber-500/20 text-amber-400">
+                <div className="p-2 bg-blue-50 rounded-xl border border-blue-200 text-blue-600">
                   <Calculator className="w-4 h-4" />
                 </div>
                 <div className="text-left">
-                  <h3 className="text-xs font-extrabold text-slate-100 uppercase tracking-wide">Passbook & EOD Master Summary</h3>
-                  <p className="text-[10px] text-slate-400">All Cash, Bank Balances & Details at One Place</p>
+                  <h3 className="text-xs font-black text-slate-800 uppercase tracking-wide">Passbook & EOD Master Summary</h3>
+                  <p className="text-[10px] text-slate-500">All Cash, Bank Balances & Details at One Place</p>
                 </div>
               </div>
               {activeDay && (
-                <span className="text-[9px] bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 font-extrabold px-2 py-0.5 rounded-full">
+                <span className="text-[9px] bg-emerald-50 border border-emerald-200 text-emerald-700 font-extrabold px-2.5 py-0.5 rounded-full">
                   SESSION OPEN
                 </span>
               )}
             </div>
 
             {/* Physical Cash Breakdown Section */}
-            <div className="bg-slate-950/60 border border-slate-850 p-3 rounded-xl flex flex-col gap-2 text-left">
+            <div className="bg-slate-50 border border-slate-200 p-3 rounded-xl flex flex-col gap-2.5 text-left shadow-2xs">
               <div className="flex justify-between items-center">
-                <span className="text-[10px] font-bold uppercase text-amber-400 tracking-wider flex items-center gap-1">
-                  <IndianRupee className="w-3 h-3" /> Cash In Hand: {formatINR(activeDay ? activeDay.closingCash : 0)}
+                <span className="text-[10px] font-bold uppercase text-amber-800 tracking-wider flex items-center gap-1">
+                  <IndianRupee className="w-3 h-3 text-amber-600" /> Cash In Hand: {formatINR(activeDay ? activeDay.closingCash : 0)}
                 </span>
-                <span className="text-[9px] text-slate-500">Opening: {formatINR(activeDay ? activeDay.openingCash : 0)}</span>
+                <span className="text-[9px] text-slate-400 font-medium">Opening: {formatINR(activeDay ? activeDay.openingCash : 0)}</span>
               </div>
 
-              {/* Denomination Notes Grid */}
-              <div className="grid grid-cols-4 sm:grid-cols-7 gap-1.5 pt-1">
-                <div className="bg-slate-900 p-1.5 rounded-lg border border-slate-800 text-center">
-                  <span className="text-[8px] text-slate-500 font-bold block">₹500</span>
-                  <span className="text-xs font-extrabold text-emerald-400">{denoms.n500 || 0}</span>
+              {/* Denomination Notes Grid (Clickable) */}
+              <div 
+                onClick={() => setShowDenomModal(true)}
+                className="grid grid-cols-4 sm:grid-cols-7 gap-1.5 pt-1 cursor-pointer hover:opacity-90 transition-all"
+                title="Click to edit notes and coins"
+              >
+                <div className="bg-white p-1.5 rounded-lg border border-slate-200 text-center shadow-2xs">
+                  <span className="text-[8px] text-slate-400 font-bold block">₹500</span>
+                  <span className="text-xs font-black text-emerald-600">{denoms.n500 || 0}</span>
                 </div>
-                <div className="bg-slate-900 p-1.5 rounded-lg border border-slate-800 text-center">
-                  <span className="text-[8px] text-slate-500 font-bold block">₹200</span>
-                  <span className="text-xs font-extrabold text-amber-400">{denoms.n200 || 0}</span>
+                <div className="bg-white p-1.5 rounded-lg border border-slate-200 text-center shadow-2xs">
+                  <span className="text-[8px] text-slate-400 font-bold block">₹200</span>
+                  <span className="text-xs font-black text-amber-600">{denoms.n200 || 0}</span>
                 </div>
-                <div className="bg-slate-900 p-1.5 rounded-lg border border-slate-800 text-center">
-                  <span className="text-[8px] text-slate-500 font-bold block">₹100</span>
-                  <span className="text-xs font-extrabold text-blue-400">{denoms.n100 || 0}</span>
+                <div className="bg-white p-1.5 rounded-lg border border-slate-200 text-center shadow-2xs">
+                  <span className="text-[8px] text-slate-400 font-bold block">₹100</span>
+                  <span className="text-xs font-black text-blue-600">{denoms.n100 || 0}</span>
                 </div>
-                <div className="bg-slate-900 p-1.5 rounded-lg border border-slate-800 text-center">
-                  <span className="text-[8px] text-slate-500 font-bold block">₹50</span>
-                  <span className="text-xs font-extrabold text-indigo-400">{denoms.n50 || 0}</span>
+                <div className="bg-white p-1.5 rounded-lg border border-slate-200 text-center shadow-2xs">
+                  <span className="text-[8px] text-slate-400 font-bold block">₹50</span>
+                  <span className="text-xs font-black text-indigo-600">{denoms.n50 || 0}</span>
                 </div>
-                <div className="bg-slate-900 p-1.5 rounded-lg border border-slate-800 text-center">
-                  <span className="text-[8px] text-slate-500 font-bold block">₹20</span>
-                  <span className="text-xs font-extrabold text-orange-400">{denoms.n20 || 0}</span>
+                <div className="bg-white p-1.5 rounded-lg border border-slate-200 text-center shadow-2xs">
+                  <span className="text-[8px] text-slate-400 font-bold block">₹20</span>
+                  <span className="text-xs font-black text-orange-600">{denoms.n20 || 0}</span>
                 </div>
-                <div className="bg-slate-900 p-1.5 rounded-lg border border-slate-800 text-center">
-                  <span className="text-[8px] text-slate-500 font-bold block">₹10</span>
-                  <span className="text-xs font-extrabold text-purple-400">{denoms.n10 || 0}</span>
+                <div className="bg-white p-1.5 rounded-lg border border-slate-200 text-center shadow-2xs">
+                  <span className="text-[8px] text-slate-400 font-bold block">₹10</span>
+                  <span className="text-xs font-black text-purple-600">{denoms.n10 || 0}</span>
                 </div>
-                <div className="bg-slate-900 p-1.5 rounded-lg border border-slate-800 text-center col-span-2 sm:col-span-1">
-                  <span className="text-[8px] text-slate-500 font-bold block">Coins</span>
-                  <div className="flex flex-col text-[8px] mt-0.5">
-                    {denoms.c20 > 0 && <span className="text-yellow-400">₹20×{denoms.c20}</span>}
-                    {denoms.c10 > 0 && <span className="text-yellow-400">₹10×{denoms.c10}</span>}
-                    {denoms.c5 > 0 && <span className="text-yellow-400">₹5×{denoms.c5}</span>}
-                    {denoms.c2 > 0 && <span className="text-yellow-400">₹2×{denoms.c2}</span>}
-                    {denoms.c1 > 0 && <span className="text-yellow-400">₹1×{denoms.c1}</span>}
-                    {denoms.coins > 0 && <span className="text-yellow-400">₹{denoms.coins}</span>}
-                    {(!denoms.c20 && !denoms.c10 && !denoms.c5 && !denoms.c2 && !denoms.c1 && !denoms.coins) && <span className="text-slate-500">0</span>}
+                <div className="bg-white p-1.5 rounded-lg border border-slate-200 text-center col-span-2 sm:col-span-1 shadow-2xs">
+                  <span className="text-[8px] text-slate-400 font-bold block">Coins</span>
+                  <div className="flex flex-col text-[8px] mt-0.5 font-bold">
+                    {denoms.c20 > 0 && <span className="text-amber-700">₹20×{denoms.c20}</span>}
+                    {denoms.c10 > 0 && <span className="text-amber-700">₹10×{denoms.c10}</span>}
+                    {denoms.c5 > 0 && <span className="text-amber-700">₹5×{denoms.c5}</span>}
+                    {denoms.c2 > 0 && <span className="text-amber-700">₹2×{denoms.c2}</span>}
+                    {denoms.c1 > 0 && <span className="text-amber-700">₹1×{denoms.c1}</span>}
+                    {denoms.coins > 0 && <span className="text-amber-700">₹{denoms.coins}</span>}
+                    {(!denoms.c20 && !denoms.c10 && !denoms.c5 && !denoms.c2 && !denoms.c1 && !denoms.coins) && <span className="text-slate-400">0</span>}
                   </div>
                 </div>
+              </div>
+
+              {/* Action Buttons for Physical Cash Addition in Passbook */}
+              <div className="flex flex-wrap gap-2 pt-1 border-t border-slate-200">
+                <button
+                  type="button"
+                  onClick={() => setShowDenomModal(true)}
+                  className="flex-1 min-w-[130px] h-9 px-3 bg-amber-50 hover:bg-amber-100 active:scale-95 text-amber-800 border border-amber-200 rounded-xl text-xs font-extrabold flex items-center justify-center gap-1.5 transition-all shadow-xs"
+                >
+                  <Calculator className="w-3.5 h-3.5 text-amber-600" /> Add / Count Notes
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleOpenCurrentReceipt}
+                  className="flex-1 min-w-[130px] h-9 px-3 bg-blue-50 hover:bg-blue-100 active:scale-95 text-blue-700 border border-blue-200 rounded-xl text-xs font-extrabold flex items-center justify-center gap-1.5 transition-all shadow-xs"
+                >
+                  <FileText className="w-3.5 h-3.5 text-blue-600" /> Statement Receipt
+                </button>
+
+                {activeDay && (
+                  <button
+                    type="button"
+                    onClick={handleCloseLedgerFromPassbook}
+                    className="h-9 px-3 bg-red-600 hover:bg-red-700 active:scale-95 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all shadow-xs"
+                  >
+                    <Square className="w-3.5 h-3.5 fill-current" /> Close Ledger
+                  </button>
+                )}
               </div>
             </div>
 
             {/* Bank Accounts Remaining Balances Section */}
-            <div className="bg-slate-950/60 border border-slate-850 p-3 rounded-xl flex flex-col gap-2 text-left">
+            <div className="bg-slate-50 border border-slate-200 p-3 rounded-xl flex flex-col gap-2 text-left shadow-2xs">
               <div className="flex justify-between items-center">
-                <span className="text-[10px] font-bold uppercase text-emerald-400 tracking-wider flex items-center gap-1">
-                  <Landmark className="w-3 h-3" /> Bank Accounts Remaining Balance
+                <span className="text-[10px] font-bold uppercase text-blue-800 tracking-wider flex items-center gap-1">
+                  <Landmark className="w-3 h-3 text-blue-600" /> Bank Accounts Remaining Balance
                 </span>
-                <span className="text-[10px] font-extrabold text-emerald-400">Total: {formatINR(liveTotalBankMoney)}</span>
+                <span className="text-[10px] font-black text-blue-900">Total: {formatINR(liveTotalBankMoney)}</span>
               </div>
 
               <div className="grid grid-cols-2 gap-2">
                 {accounts.map(acc => (
-                  <div key={acc._id} className="bg-slate-900 p-2 rounded-lg border border-slate-800 flex justify-between items-center text-[10px]">
-                    <span className="font-bold text-slate-300 truncate max-w-[80px]">{acc.bankName}</span>
-                    <span className="font-extrabold text-emerald-400">{formatINR(acc.currentBalance)}</span>
+                  <div key={acc._id} className="bg-white p-2 rounded-lg border border-slate-200 flex justify-between items-center text-[10px] shadow-2xs">
+                    <span className="font-bold text-slate-700 truncate max-w-[80px]">{acc.bankName}</span>
+                    <span className="font-black text-blue-700">{formatINR(acc.currentBalance)}</span>
                   </div>
                 ))}
               </div>
@@ -349,13 +601,13 @@ export default function PassbookAccounts({
 
             {/* Udhar & Jama Ledger Summary */}
             <div className="grid grid-cols-2 gap-2 text-left">
-              <div className="bg-red-950/40 border border-red-500/20 p-2.5 rounded-xl flex flex-col gap-0.5">
-                <span className="text-[9px] font-bold uppercase text-red-400">Total Udhar Owed</span>
-                <span className="text-sm font-extrabold text-red-300">{formatINR(totalOutstandingUdhar)}</span>
+              <div className="bg-rose-50 border border-rose-200 p-2.5 rounded-xl flex flex-col gap-0.5 shadow-2xs">
+                <span className="text-[9px] font-bold uppercase text-rose-700">Total Udhar Owed</span>
+                <span className="text-sm font-black text-rose-700">{formatINR(totalOutstandingUdhar)}</span>
               </div>
-              <div className="bg-emerald-950/40 border border-emerald-500/20 p-2.5 rounded-xl flex flex-col gap-0.5">
-                <span className="text-[9px] font-bold uppercase text-emerald-400">Total Jama Advance</span>
-                <span className="text-sm font-extrabold text-emerald-300">{formatINR(totalCustomerJama)}</span>
+              <div className="bg-emerald-50 border border-emerald-200 p-2.5 rounded-xl flex flex-col gap-0.5 shadow-2xs">
+                <span className="text-[9px] font-bold uppercase text-emerald-700">Total Jama Advance</span>
+                <span className="text-sm font-black text-emerald-700">{formatINR(totalCustomerJama)}</span>
               </div>
             </div>
           </div>
@@ -363,13 +615,13 @@ export default function PassbookAccounts({
           {/* Search bar & Type Filter */}
           <div className="flex flex-col gap-2">
             <div className="relative">
-              <Search className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
+              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
               <input
                 type="text"
                 placeholder="Search by Bank or Customer Name..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full h-10 pl-9 pr-4 text-xs bg-slate-900 border border-slate-800 rounded-xl focus:border-amber-500 focus:outline-none placeholder:text-slate-500 text-slate-100 font-semibold"
+                className="w-full h-10 pl-9 pr-4 text-xs bg-white border border-slate-300 rounded-xl focus:border-blue-600 focus:outline-none placeholder:text-slate-400 text-slate-900 font-semibold shadow-xs"
               />
             </div>
 
@@ -386,10 +638,10 @@ export default function PassbookAccounts({
                   key={f.id}
                   type="button"
                   onClick={() => setFilterType(f.id)}
-                  className={`px-3 py-1.5 rounded-lg text-[10px] font-bold shrink-0 transition-all ${
+                  className={`px-3 py-1.5 rounded-lg text-[10px] font-bold shrink-0 transition-all shadow-2xs ${
                     filterType === f.id
-                      ? 'bg-amber-500 text-slate-950'
-                      : 'bg-slate-900 text-slate-400 border border-slate-800 hover:text-slate-200'
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-white text-slate-600 border border-slate-200 hover:text-slate-900'
                   }`}
                 >
                   {f.label}
@@ -401,7 +653,7 @@ export default function PassbookAccounts({
           {/* Passbook Transactions List */}
           <div className="flex flex-col gap-2 max-h-[50vh] overflow-y-auto no-scrollbar pb-10">
             {filteredTransactions.length === 0 ? (
-              <div className="bg-slate-900/20 border border-slate-800/40 rounded-xl p-8 text-center text-slate-500 text-xs font-bold">
+              <div className="bg-white border border-slate-200 rounded-xl p-8 text-center text-slate-400 text-xs font-bold shadow-xs">
                 No matching transactions found in passbook.
               </div>
             ) : (
@@ -413,17 +665,17 @@ export default function PassbookAccounts({
                 const isJama = tx.type === 'Jama' || tx.commissionMode === 'Jama';
 
                 return (
-                  <div key={tx._id} className={`bg-slate-900/50 border ${isUdhar ? 'border-red-500/30' : isJama ? 'border-emerald-500/30' : 'border-slate-800/80'} rounded-xl p-3.5 flex justify-between items-center transition-all`}>
+                  <div key={tx._id} className={`bg-white border ${isUdhar ? 'border-rose-200' : isJama ? 'border-emerald-200' : 'border-slate-200'} rounded-xl p-3.5 flex justify-between items-center transition-all shadow-xs`}>
                     <div className="flex flex-col gap-1 text-left">
                       <div className="flex items-center gap-1.5">
-                        <CreditCard className="w-3.5 h-3.5 text-slate-400" />
-                        <span className="text-xs font-bold text-slate-200">{bankNameStr}</span>
-                        {isUdhar && <span className="text-[8px] bg-red-500/20 text-red-400 font-extrabold px-1.5 py-0.5 rounded">UDHAR</span>}
-                        {isJama && <span className="text-[8px] bg-emerald-500/20 text-emerald-400 font-extrabold px-1.5 py-0.5 rounded">JAMA</span>}
+                        <CreditCard className="w-3.5 h-3.5 text-blue-600" />
+                        <span className="text-xs font-bold text-slate-800">{bankNameStr}</span>
+                        {isUdhar && <span className="text-[8px] bg-rose-50 text-rose-700 font-extrabold px-1.5 py-0.5 rounded border border-rose-200">UDHAR</span>}
+                        {isJama && <span className="text-[8px] bg-emerald-50 text-emerald-700 font-extrabold px-1.5 py-0.5 rounded border border-emerald-200">JAMA</span>}
                       </div>
 
-                      <span className="text-[10px] text-slate-500 flex items-center gap-1">
-                        <Calendar className="w-3 h-3 text-slate-600" />
+                      <span className="text-[10px] text-slate-400 flex items-center gap-1">
+                        <Calendar className="w-3 h-3 text-slate-400" />
                         {isToday
                           ? `Today, ${dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
                           : dateObj.toLocaleDateString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
@@ -435,7 +687,7 @@ export default function PassbookAccounts({
                         <div className="flex items-center gap-1 mt-1">
                           <input
                             type="text"
-                            className="h-6 px-1.5 text-[9px] bg-slate-950 border border-slate-800 rounded text-slate-100 focus:border-amber-500 focus:outline-none font-bold placeholder:text-slate-700 w-28"
+                            className="h-6 px-1.5 text-[9px] bg-white border border-slate-300 rounded text-slate-900 focus:border-blue-600 focus:outline-none font-bold placeholder:text-slate-400 w-28 shadow-2xs"
                             value={tempName}
                             onChange={(e) => setTempName(e.target.value)}
                             placeholder="Customer Name"
@@ -444,45 +696,71 @@ export default function PassbookAccounts({
                           <button
                             type="button"
                             onClick={() => handleSaveName(tx._id)}
-                            className="h-6 w-6 bg-emerald-600 hover:bg-emerald-700 text-slate-100 flex items-center justify-center rounded text-[9px] font-bold"
+                            className="h-6 w-6 bg-blue-600 hover:bg-blue-700 text-white flex items-center justify-center rounded text-[9px] font-bold shadow-2xs"
                           >
                             ✓
                           </button>
                           <button
                             type="button"
                             onClick={() => setEditingTxId(null)}
-                            className="h-6 w-6 bg-slate-800 border border-slate-700 hover:bg-slate-750 text-slate-400 flex items-center justify-center rounded text-[9px]"
+                            className="h-6 w-6 bg-slate-100 border border-slate-200 hover:bg-slate-200 text-slate-600 flex items-center justify-center rounded text-[9px]"
                           >
                             ✕
                           </button>
                         </div>
                       ) : (
-                        <div className="flex items-center gap-1 mt-1 text-[9px] leading-none select-none">
-                          <span className="text-slate-500">Customer:</span>
-                          <span className="text-slate-200 font-extrabold truncate max-w-[100px]">{tx.customerName || '—'}</span>
+                        <div className="flex items-center gap-1 mt-0.5 text-[9px] leading-none select-none">
+                          <span className="text-slate-400">Customer:</span>
+                          <span className="text-slate-800 font-extrabold truncate max-w-[120px]">{tx.customerName || 'Walk-in'}</span>
                           <button
                             type="button"
                             onClick={() => {
                               setEditingTxId(tx._id);
                               setTempName(tx.customerName || '');
                             }}
-                            className="text-amber-500/80 hover:text-amber-400 p-0.5"
+                            className="text-blue-600 hover:text-blue-800 p-0.5"
                           >
                             <Edit3 className="w-2.5 h-2.5 inline" />
                           </button>
                         </div>
                       )}
+
+                      {/* Account & Physical Cash Movement Track */}
+                      <div className="flex flex-wrap items-center gap-1 mt-1 text-[8.5px] font-bold">
+                        <span className="bg-blue-50 text-blue-800 px-1.5 py-0.5 rounded border border-blue-200 flex items-center gap-0.5">
+                          <Landmark className="w-2.5 h-2.5 text-blue-600" />
+                          {bankNameStr}: {tx.customerAmount >= 0 ? `+${formatINR(tx.customerAmount)}` : `-${formatINR(Math.abs(tx.customerAmount))}`}
+                        </span>
+                        <span className={`px-1.5 py-0.5 rounded border flex items-center gap-0.5 ${
+                          tx.cashOut > 0 ? 'bg-amber-50 text-amber-900 border-amber-200' : 'bg-emerald-50 text-emerald-900 border-emerald-200'
+                        }`}>
+                          <Coins className="w-2.5 h-2.5 text-amber-600" />
+                          {tx.cashOut > 0 ? `Drawer Cash Out: -${formatINR(tx.cashOut)}` : `Drawer Cash In: +${formatINR(Math.abs(tx.cashOut))}`}
+                        </span>
+                      </div>
+
+                      {/* Physical Notes Breakdown Badge */}
+                      {tx.noteDetails && (
+                        <div className="mt-1">
+                          {tx.noteDetails.includes('Skipped') ? (
+                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[8px] font-bold bg-slate-100 text-slate-700 border border-slate-200">
+                              ⏳ Notes: Skipped (Count at EOD / Close Ledger)
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[8px] font-extrabold bg-emerald-50 text-emerald-800 border border-emerald-200">
+                              💵 Notes: {tx.noteDetails}
+                            </span>
+                          )}
+                        </div>
+                      )}
                     </div>
 
-                    <div className="text-right flex flex-col gap-1">
-                      <span className={`text-xs font-extrabold ${isUdhar ? 'text-red-400' : isJama ? 'text-emerald-400' : (tx.customerAmount >= 0 ? 'text-emerald-400' : 'text-rose-400')}`}>
+                    <div className="text-right flex flex-col gap-1 shrink-0 ml-2">
+                      <span className={`text-xs font-black ${isUdhar ? 'text-rose-600' : isJama ? 'text-emerald-600' : (tx.customerAmount >= 0 ? 'text-emerald-600' : 'text-rose-600')}`}>
                         {isUdhar ? `₹${Math.abs(tx.cashOut || tx.customerAmount)} UDHAR` : isJama ? `+${formatINR(Math.abs(tx.customerAmount || tx.cashOut))} JAMA` : (tx.customerAmount >= 0 ? '+' : '') + formatINR(tx.customerAmount)}
                       </span>
-                      <div className="text-[9px] text-slate-400 flex items-center justify-end gap-1.5">
-                        <span className="bg-slate-800 text-slate-300 px-1.5 py-0.5 rounded border border-slate-700">
-                          {tx.type === 'Debit' ? 'Cash In' : tx.type === 'Jama' ? 'Advance' : 'Cash Out'}: {formatINR(Math.abs(tx.cashOut))}
-                        </span>
-                        <span className="bg-cyan-500/10 text-cyan-400 px-1 py-0.5 rounded border border-cyan-500/10 font-semibold">
+                      <div className="text-[9px] text-slate-500 flex flex-col items-end gap-0.5">
+                        <span className="bg-emerald-50 text-emerald-700 px-1 py-0.5 rounded border border-emerald-200 font-semibold text-[8px]">
                           +{formatINR(tx.profit)} ({tx.commissionMode || 'Deducted'})
                         </span>
                       </div>
@@ -495,25 +773,298 @@ export default function PassbookAccounts({
         </div>
       )}
 
+      {/* CASH NOTE COUNTER DEDICATED SUB-TAB */}
+      {activeSubTab === 'cash_counter' && (
+        <div className="flex flex-col gap-4 text-left">
+          {/* Header Card */}
+          <div className="bg-white border border-slate-200 rounded-2xl p-4 flex flex-col gap-2 shadow-sm">
+            <div className="flex justify-between items-center">
+              <div className="flex items-center gap-2">
+                <div className="p-2 bg-blue-50 rounded-xl border border-blue-200 text-blue-600 shadow-2xs">
+                  <Calculator className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-black text-slate-800 uppercase tracking-wide">
+                    SBI Kiosk Cash Note & Coin Counter
+                  </h3>
+                  <p className="text-[10px] text-slate-500">
+                    Count physical cash, add/edit notes, and sync drawer with passbook
+                  </p>
+                </div>
+              </div>
+              <span className={`px-2.5 py-0.5 rounded-full text-[9px] font-extrabold uppercase ${
+                activeDay
+                  ? 'bg-emerald-50 border border-emerald-200 text-emerald-700'
+                  : 'bg-red-50 border border-red-200 text-red-700'
+              }`}>
+                {activeDay ? 'Session Open' : 'Session Closed'}
+              </span>
+            </div>
+
+            {!activeDay && (
+              <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 flex items-center justify-between mt-1 shadow-2xs">
+                <div className="flex items-center gap-2 text-xs text-amber-800 font-bold">
+                  <AlertTriangle className="w-4 h-4 shrink-0 text-amber-600" />
+                  <span>Ledger not open yet. Saving notes will automatically open today's session!</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => handleSaveDenoms(calculateCashNotesTotal(cashNotes), cashNotes)}
+                  className="px-3 py-1.5 bg-amber-500 hover:bg-amber-400 active:scale-95 text-slate-950 font-black text-xs rounded-lg shrink-0 transition-all shadow-xs"
+                >
+                  Open Ledger
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Paper Notes List */}
+          <div className="bg-white border border-slate-200 rounded-2xl p-3 flex flex-col gap-2 shadow-sm">
+            <div className="flex justify-between items-center text-[10px] font-bold uppercase tracking-wider text-slate-500 px-1">
+              <span>Paper Notes</span>
+              <span className="text-blue-700 font-extrabold">
+                Total Notes: {(cashNotes.n500 || 0) + (cashNotes.n200 || 0) + (cashNotes.n100 || 0) + (cashNotes.n50 || 0) + (cashNotes.n20 || 0) + (cashNotes.n10 || 0)} pcs
+              </span>
+            </div>
+
+            {[
+              { key: 'n500', label: '₹500', value: 500, color: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
+              { key: 'n200', label: '₹200', value: 200, color: 'bg-amber-50 text-amber-700 border-amber-200' },
+              { key: 'n100', label: '₹100', value: 100, color: 'bg-blue-50 text-blue-700 border-blue-200' },
+              { key: 'n50',  label: '₹50',  value: 50,  color: 'bg-indigo-50 text-indigo-700 border-indigo-200' },
+              { key: 'n20',  label: '₹20',  value: 20,  color: 'bg-orange-50 text-orange-700 border-orange-200' },
+              { key: 'n10',  label: '₹10',  value: 10,  color: 'bg-purple-50 text-purple-700 border-purple-200' },
+            ].map(note => {
+              const count = cashNotes[note.key] || 0;
+              const subtotal = count * note.value;
+              return (
+                <div key={note.key} className="flex items-center justify-between gap-2 bg-slate-50 p-2 rounded-xl border border-slate-200 shadow-2xs">
+                  <div className="w-20">
+                    <span className={`text-xs font-black px-2 py-1 rounded-lg border ${note.color} w-full text-center block shadow-2xs`}>
+                      {note.label}
+                    </span>
+                  </div>
+
+                  <div className="flex items-center gap-1 flex-1 justify-center">
+                    <button
+                      type="button"
+                      onClick={() => handleCashNoteAdjust(note.key, -1)}
+                      className="w-8 h-8 bg-white hover:bg-slate-100 border border-slate-200 shadow-xs active:scale-95 text-slate-700 rounded-lg flex items-center justify-center font-bold text-sm"
+                    >
+                      -
+                    </button>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      pattern="[0-9]*"
+                      value={count === 0 ? '' : count}
+                      placeholder="0"
+                      onChange={(e) => handleCashNoteChange(note.key, e.target.value)}
+                      className="w-20 h-8 px-2 text-center text-sm font-black bg-white border border-slate-300 text-blue-900 rounded-lg focus:border-blue-600 focus:outline-none shadow-xs"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => handleCashNoteAdjust(note.key, 1)}
+                      className="w-8 h-8 bg-white hover:bg-slate-100 border border-slate-200 shadow-xs active:scale-95 text-slate-700 rounded-lg flex items-center justify-center font-bold text-sm"
+                    >
+                      +
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleCashNoteAdjust(note.key, 100)}
+                      className="h-8 px-2 bg-blue-50 hover:bg-blue-100 active:scale-95 text-[10px] text-blue-700 rounded-lg font-extrabold border border-blue-200 shadow-2xs"
+                      title="Add 1 Bundle (+100 notes)"
+                    >
+                      +100
+                    </button>
+                  </div>
+
+                  <div className="w-24 text-right">
+                    <span className="text-xs font-black text-slate-800">
+                      {formatINR(subtotal)}
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Coins List */}
+          <div className="bg-white border border-slate-200 rounded-2xl p-3 flex flex-col gap-2 shadow-sm">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 px-1">
+              Coins Breakdown
+            </span>
+
+            {[
+              { key: 'c20', label: '₹20', value: 20 },
+              { key: 'c10', label: '₹10', value: 10 },
+              { key: 'c5',  label: '₹5',  value: 5 },
+              { key: 'c2',  label: '₹2',  value: 2 },
+              { key: 'c1',  label: '₹1',  value: 1 },
+            ].map(coin => {
+              const count = cashNotes[coin.key] || 0;
+              const subtotal = count * coin.value;
+              return (
+                <div key={coin.key} className="flex items-center justify-between gap-2 bg-slate-50 p-1.5 rounded-xl border border-slate-200 shadow-2xs">
+                  <div className="w-20">
+                    <span className="text-xs font-bold px-2 py-0.5 rounded-lg border border-amber-200 bg-amber-50 text-amber-800 flex items-center justify-center gap-1 w-full shadow-2xs">
+                      <Coins className="w-3 h-3 text-amber-600" /> {coin.label}
+                    </span>
+                  </div>
+
+                  <div className="flex items-center gap-1 flex-1 justify-center">
+                    <button
+                      type="button"
+                      onClick={() => handleCashNoteAdjust(coin.key, -1)}
+                      className="w-7 h-7 bg-white hover:bg-slate-100 border border-slate-200 shadow-xs text-slate-700 rounded flex items-center justify-center font-bold text-xs"
+                    >
+                      -
+                    </button>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      pattern="[0-9]*"
+                      value={count === 0 ? '' : count}
+                      placeholder="0"
+                      onChange={(e) => handleCashNoteChange(coin.key, e.target.value)}
+                      className="w-20 h-7 px-1 text-center text-xs font-black bg-white border border-slate-300 text-amber-800 rounded focus:border-blue-600 focus:outline-none shadow-xs"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => handleCashNoteAdjust(coin.key, 1)}
+                      className="w-7 h-7 bg-white hover:bg-slate-100 border border-slate-200 shadow-xs text-slate-700 rounded flex items-center justify-center font-bold text-xs"
+                    >
+                      +
+                    </button>
+                  </div>
+
+                  <div className="w-24 text-right">
+                    <span className="text-xs font-black text-slate-800">
+                      {formatINR(subtotal)}
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
+
+            {/* Loose Coins */}
+            <div className="flex items-center justify-between gap-2 bg-slate-50 p-2 rounded-xl border border-slate-200 shadow-2xs">
+              <span className="text-xs font-bold text-slate-700 flex items-center gap-1 w-24">
+                <Coins className="w-3.5 h-3.5 text-amber-600" /> Loose Coins:
+              </span>
+              <div className="flex items-center gap-1 flex-1 justify-center">
+                <span className="text-xs text-slate-400 font-bold">₹</span>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  value={cashNotes.coins === 0 ? '' : cashNotes.coins}
+                  placeholder="0"
+                  onChange={(e) => handleCashNoteChange('coins', e.target.value)}
+                  className="w-28 h-8 px-2 text-center text-xs font-black bg-white border border-slate-300 text-amber-800 rounded-lg focus:border-blue-600 focus:outline-none shadow-xs"
+                />
+              </div>
+              <div className="w-24 text-right">
+                <span className="text-xs font-black text-slate-800">
+                  {formatINR(cashNotes.coins || 0)}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Grand Summary & Controls */}
+          <div className="bg-white border border-slate-200 rounded-2xl p-4 flex flex-col gap-3 shadow-sm">
+            <div className="bg-blue-50 border border-blue-200 p-3 rounded-xl flex flex-col gap-1 shadow-2xs">
+              <div className="flex justify-between items-center">
+                <span className="text-xs font-bold text-blue-900 flex items-center gap-1">
+                  <IndianRupee className="w-4 h-4 text-blue-700" /> Total Cash In Drawer:
+                </span>
+                <span className="text-2xl font-black text-blue-900">
+                  {formatINR(calculateCashNotesTotal(cashNotes))}
+                </span>
+              </div>
+              <div className="text-[11px] text-blue-800/80 font-medium italic">
+                {numberToIndianWords(calculateCashNotesTotal(cashNotes))}
+              </div>
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => setCashNotes({ n500: 0, n200: 0, n100: 0, n50: 0, n20: 0, n10: 0, coins: 0, c20: 0, c10: 0, c5: 0, c2: 0, c1: 0 })}
+                className="px-3 py-2.5 bg-white hover:bg-slate-100 border border-slate-200 shadow-xs active:scale-95 text-slate-700 rounded-xl text-xs font-bold flex items-center justify-center gap-1 transition-all"
+              >
+                <RotateCcw className="w-3.5 h-3.5" /> Clear
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  const total = calculateCashNotesTotal(cashNotes);
+                  setReceiptParams({
+                    dateStr: activeDay?.date || new Date().toISOString().split('T')[0],
+                    totalCash: total,
+                    denominations: cashNotes,
+                    onlineAmount: liveTotalBankMoney,
+                    accountName: 'SBI Kiosk Cash Calculation',
+                    bankAccounts: getLiveBankAccountsList()
+                  });
+                  setShowReceiptModal(true);
+                }}
+                className="px-3 py-2.5 bg-blue-50 hover:bg-blue-100 active:scale-95 text-blue-700 border border-blue-200 rounded-xl text-xs font-bold flex items-center justify-center gap-1 transition-all shadow-xs"
+              >
+                <FileText className="w-3.5 h-3.5" /> Receipt
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleSaveDenoms(calculateCashNotesTotal(cashNotes), cashNotes)}
+                disabled={isSubmitting}
+                className="flex-1 py-2.5 bg-blue-600 hover:bg-blue-700 active:scale-95 text-white rounded-xl text-xs font-black flex items-center justify-center gap-1.5 transition-all shadow-md"
+              >
+                <Check className="w-4 h-4" /> Save Cash to Passbook
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* STATEMENT RECEIPT DEDICATED SUB-TAB */}
+      {activeSubTab === 'receipt' && (
+        <div className="flex flex-col gap-4 items-center">
+          <CashStatementReceipt
+            isOpen={true}
+            onClose={() => setActiveSubTab('passbook')}
+            dateStr={activeDay?.date || new Date().toISOString().split('T')[0]}
+            accountName="SBI Kiosk Cash Calculation"
+            denominations={activeDay?.cashDenominations || cashNotes}
+            totalCash={activeDay ? activeDay.closingCash : calculateCashNotesTotal(cashNotes)}
+            onlineAmount={liveTotalBankMoney}
+            bankAccounts={getLiveBankAccountsList()}
+            kioskTitle="SBI Kiosk"
+          />
+        </div>
+      )}
+
       {/* UDHAR & JAMA Customer Ledger Sub-Tab */}
       {activeSubTab === 'udhar_jama' && (
         <div className="flex flex-col gap-4">
           <div className="flex flex-col gap-1 text-left">
-            <h3 className="text-sm font-bold text-slate-100 uppercase tracking-wide">Customer Udhar & Jama Ledger</h3>
-            <p className="text-[10px] text-slate-400">Track pending customer dues (Udhar) and advance deposits (Jama)</p>
+            <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wide">Customer Udhar & Jama Ledger</h3>
+            <p className="text-[10px] text-slate-500">Track pending customer dues (Udhar) and advance deposits (Jama)</p>
           </div>
 
           {/* Overview Cards */}
           <div className="grid grid-cols-2 gap-3">
-            <div className="bg-red-950/30 border border-red-500/20 rounded-2xl p-3 flex flex-col gap-1 text-left">
-              <span className="text-[10px] font-bold uppercase text-red-400">Pending Udhar Owed</span>
-              <span className="text-xl font-extrabold text-red-300">{formatINR(totalOutstandingUdhar)}</span>
+            <div className="bg-rose-50 border border-rose-200 rounded-2xl p-3 flex flex-col gap-1 text-left shadow-xs">
+              <span className="text-[10px] font-bold uppercase text-rose-700">Pending Udhar Owed</span>
+              <span className="text-xl font-black text-rose-700">{formatINR(totalOutstandingUdhar)}</span>
               <span className="text-[9px] text-slate-500">Unpaid service dues</span>
             </div>
 
-            <div className="bg-emerald-950/30 border border-emerald-500/20 rounded-2xl p-3 flex flex-col gap-1 text-left">
-              <span className="text-[10px] font-bold uppercase text-emerald-400">Customer Jama Advances</span>
-              <span className="text-xl font-extrabold text-emerald-300">{formatINR(totalCustomerJama)}</span>
+            <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-3 flex flex-col gap-1 text-left shadow-xs">
+              <span className="text-[10px] font-bold uppercase text-emerald-700">Customer Jama Advances</span>
+              <span className="text-xl font-black text-emerald-700">{formatINR(totalCustomerJama)}</span>
               <span className="text-[9px] text-slate-500">Advance deposits</span>
             </div>
           </div>
@@ -521,7 +1072,7 @@ export default function PassbookAccounts({
           {/* Customer Ledger List */}
           <div className="flex flex-col gap-2 max-h-[60vh] overflow-y-auto no-scrollbar pb-10">
             {customerLedgers.length === 0 ? (
-              <div className="bg-slate-900/20 border border-slate-800/40 rounded-xl p-8 text-center text-slate-500 text-xs font-bold">
+              <div className="bg-white border border-slate-200 rounded-xl p-8 text-center text-slate-400 text-xs font-bold shadow-xs">
                 No customer Udhar or Jama records created yet.
               </div>
             ) : (
@@ -530,22 +1081,22 @@ export default function PassbookAccounts({
                 const isAdvance = cust.netBalance > 0;
 
                 return (
-                  <div key={cust.customerName} className={`bg-slate-900/50 border ${isDue ? 'border-red-500/30' : isAdvance ? 'border-emerald-500/30' : 'border-slate-800'} rounded-2xl p-4 flex justify-between items-center transition-all text-left`}>
+                  <div key={cust.customerName} className={`bg-white border ${isDue ? 'border-rose-200' : isAdvance ? 'border-emerald-200' : 'border-slate-200'} rounded-2xl p-4 flex justify-between items-center transition-all text-left shadow-xs`}>
                     <div className="flex flex-col gap-1">
-                      <span className="text-xs font-extrabold text-slate-100">{cust.customerName}</span>
-                      <div className="flex items-center gap-2 text-[10px] text-slate-400">
-                        <span>Udhar: <span className="text-red-400 font-bold">{formatINR(cust.totalUdhar)}</span></span>
+                      <span className="text-xs font-black text-slate-800">{cust.customerName}</span>
+                      <div className="flex items-center gap-2 text-[10px] text-slate-500">
+                        <span>Udhar: <span className="text-rose-600 font-bold">{formatINR(cust.totalUdhar)}</span></span>
                         <span>•</span>
-                        <span>Jama: <span className="text-emerald-400 font-bold">{formatINR(cust.totalJama)}</span></span>
+                        <span>Jama: <span className="text-emerald-600 font-bold">{formatINR(cust.totalJama)}</span></span>
                       </div>
                     </div>
 
                     <div className="flex items-center gap-3">
                       <div className="text-right flex flex-col items-end">
-                        <span className={`text-xs font-extrabold ${isDue ? 'text-red-400' : isAdvance ? 'text-emerald-400' : 'text-slate-400'}`}>
+                        <span className={`text-xs font-black ${isDue ? 'text-rose-600' : isAdvance ? 'text-emerald-600' : 'text-slate-500'}`}>
                           {isDue ? `₹${Math.abs(cust.netBalance)} UDHAR` : isAdvance ? `+${formatINR(cust.netBalance)} JAMA` : 'Settled (₹0)'}
                         </span>
-                        <span className="text-[9px] text-slate-500">{cust.txCount} transactions</span>
+                        <span className="text-[9px] text-slate-400">{cust.txCount} transactions</span>
                       </div>
 
                       {isDue && (
@@ -556,7 +1107,7 @@ export default function PassbookAccounts({
                             setSettleAmount(String(Math.abs(cust.netBalance)));
                             setErrorMsg('');
                           }}
-                          className="px-2.5 py-1.5 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/30 rounded-xl text-[10px] font-bold transition-all"
+                          className="px-2.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 rounded-xl text-[10px] font-bold transition-all shadow-xs"
                         >
                           Settle Dues
                         </button>
@@ -572,20 +1123,20 @@ export default function PassbookAccounts({
 
       {/* Settle Udhar Modal */}
       {settleCustomer && (
-        <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-4 select-none">
-          <form onSubmit={handleSettleSubmit} className="bg-slate-900 border border-slate-800 rounded-3xl p-5 w-full max-w-sm flex flex-col gap-4 text-left shadow-2xl animate-in fade-in zoom-in-95 duration-150">
-            <div className="flex items-center gap-2 border-b border-slate-800 pb-3">
-              <div className="p-2 bg-emerald-500/10 rounded-xl border border-emerald-500/20 text-emerald-400">
+        <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4 select-none">
+          <form onSubmit={handleSettleSubmit} className="bg-white border border-slate-200 rounded-3xl p-5 w-full max-w-sm flex flex-col gap-4 text-left shadow-2xl animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-center gap-2 border-b border-slate-100 pb-3">
+              <div className="p-2 bg-emerald-50 rounded-xl border border-emerald-200 text-emerald-600">
                 <CheckCircle2 className="w-5 h-5" />
               </div>
               <div>
-                <h3 className="font-bold text-sm text-slate-100">Settle Customer Udhar</h3>
-                <p className="text-[10px] text-slate-400">Customer paying pending credit: <span className="font-bold text-slate-200">{settleCustomer.customerName}</span></p>
+                <h3 className="font-bold text-sm text-slate-800">Settle Customer Udhar</h3>
+                <p className="text-[10px] text-slate-500">Customer paying pending credit: <span className="font-bold text-slate-800">{settleCustomer.customerName}</span></p>
               </div>
             </div>
 
             <div className="flex flex-col gap-1.5">
-              <label className="text-[10px] uppercase font-bold tracking-wider text-slate-400">
+              <label className="text-[10px] uppercase font-bold tracking-wider text-slate-500">
                 Settlement Payment Amount (₹)
               </label>
               <input
@@ -595,22 +1146,22 @@ export default function PassbookAccounts({
                 required
                 value={settleAmount}
                 onChange={(e) => setSettleAmount(e.target.value.replace(/[^0-9]/g, ''))}
-                className="w-full h-12 bg-slate-950 border border-slate-800 text-emerald-400 font-extrabold text-xl text-center rounded-xl px-3 focus:border-emerald-500 focus:outline-none"
+                className="w-full h-12 bg-white border border-slate-300 text-emerald-600 font-black text-xl text-center rounded-xl px-3 focus:border-emerald-600 focus:outline-none shadow-xs"
               />
             </div>
 
             <div className="flex flex-col gap-1.5">
-              <label className="text-[10px] uppercase font-bold tracking-wider text-slate-400">
+              <label className="text-[10px] uppercase font-bold tracking-wider text-slate-500">
                 Received Via
               </label>
               <div className="grid grid-cols-2 gap-2">
                 <button
                   type="button"
                   onClick={() => setSettleMethod('cash')}
-                  className={`py-2 px-3 rounded-xl border text-xs font-bold transition-all ${
+                  className={`py-2 px-3 rounded-xl border text-xs font-bold transition-all shadow-xs ${
                     settleMethod === 'cash'
-                      ? 'bg-emerald-500/20 border-emerald-400 text-emerald-300'
-                      : 'bg-slate-950 border-slate-800 text-slate-400'
+                      ? 'bg-emerald-50 border-emerald-500 text-emerald-800'
+                      : 'bg-white border-slate-200 text-slate-600 hover:border-slate-300'
                   }`}
                 >
                   Cash In Hand
@@ -618,10 +1169,10 @@ export default function PassbookAccounts({
                 <button
                   type="button"
                   onClick={() => setSettleMethod('bank')}
-                  className={`py-2 px-3 rounded-xl border text-xs font-bold transition-all ${
+                  className={`py-2 px-3 rounded-xl border text-xs font-bold transition-all shadow-xs ${
                     settleMethod === 'bank'
-                      ? 'bg-emerald-500/20 border-emerald-400 text-emerald-300'
-                      : 'bg-slate-950 border-slate-800 text-slate-400'
+                      ? 'bg-emerald-50 border-emerald-500 text-emerald-800'
+                      : 'bg-white border-slate-200 text-slate-600 hover:border-slate-300'
                   }`}
                 >
                   Bank Transfer
@@ -631,13 +1182,13 @@ export default function PassbookAccounts({
 
             {settleMethod === 'bank' && accounts.length > 0 && (
               <div className="flex flex-col gap-1.5">
-                <label className="text-[10px] uppercase font-bold tracking-wider text-slate-400">
+                <label className="text-[10px] uppercase font-bold tracking-wider text-slate-500">
                   Target Bank Account
                 </label>
                 <select
                   value={settleBankId}
                   onChange={(e) => setSettleBankId(e.target.value)}
-                  className="w-full h-10 px-3 text-xs bg-slate-950 border border-slate-800 rounded-xl text-slate-100 font-bold focus:outline-none"
+                  className="w-full h-10 px-3 text-xs bg-white border border-slate-300 rounded-xl text-slate-900 font-bold focus:outline-none shadow-xs"
                 >
                   {accounts.map(a => (
                     <option key={a._id} value={a._id}>{a.bankName} ({formatINR(a.currentBalance)})</option>
@@ -650,14 +1201,14 @@ export default function PassbookAccounts({
               <button
                 type="button"
                 onClick={() => setSettleCustomer(null)}
-                className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold transition-all"
+                className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition-all border border-slate-200"
               >
                 Cancel
               </button>
               <button
                 type="submit"
                 disabled={isSubmitting}
-                className="flex-1 py-2.5 bg-emerald-500 hover:bg-emerald-600 text-slate-950 rounded-xl text-xs font-extrabold transition-all shadow-md"
+                className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-extrabold transition-all shadow-md"
               >
                 Confirm Payment
               </button>
@@ -669,9 +1220,9 @@ export default function PassbookAccounts({
       {/* ACCOUNTS SUB-TAB */}
       {activeSubTab === 'accounts' && (
         <div className="flex flex-col gap-4">
-          <form onSubmit={handleAddAccount} className="bg-slate-900/30 border border-slate-850 p-4 rounded-2xl flex flex-col gap-3 text-left">
-            <h3 className="text-xs font-bold text-slate-200 flex items-center gap-1.5">
-              <PlusCircle className="w-4 h-4 text-amber-500" /> Register Bank Account
+          <form onSubmit={handleAddAccount} className="bg-white border border-slate-200 p-4 rounded-2xl flex flex-col gap-3 text-left shadow-sm">
+            <h3 className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+              <PlusCircle className="w-4 h-4 text-blue-600" /> Register Bank Account
             </h3>
             
             <div className="flex flex-col gap-1.5">
@@ -680,7 +1231,7 @@ export default function PassbookAccounts({
                 placeholder="Bank Name (e.g. SBI, ICICI, HDFC)"
                 value={bankName}
                 onChange={(e) => { setBankName(e.target.value); setErrorMsg(''); setSuccessMsg(''); }}
-                className="w-full h-10 px-3 text-xs bg-slate-900 border border-slate-800 rounded-xl focus:border-amber-500 focus:outline-none placeholder:text-slate-600 text-slate-100 font-semibold"
+                className="w-full h-10 px-3 text-xs bg-white border border-slate-300 rounded-xl focus:border-blue-600 focus:outline-none placeholder:text-slate-400 text-slate-900 font-semibold shadow-xs"
               />
             </div>
 
@@ -697,24 +1248,24 @@ export default function PassbookAccounts({
                   setErrorMsg('');
                   setSuccessMsg('');
                 }}
-                className="w-full h-10 px-3 text-xs bg-slate-900 border border-slate-800 rounded-xl focus:border-amber-500 focus:outline-none placeholder:text-slate-600 text-slate-100 font-semibold"
+                className="w-full h-10 px-3 text-xs bg-white border border-slate-300 rounded-xl focus:border-blue-600 focus:outline-none placeholder:text-slate-400 text-slate-900 font-semibold shadow-xs"
               />
             </div>
 
             {errorMsg && (
-              <p className="text-[10px] text-red-400 font-semibold">{errorMsg}</p>
+              <p className="text-[10px] text-red-600 font-semibold">{errorMsg}</p>
             )}
             {successMsg && (
-              <p className="text-[10px] text-emerald-400 font-semibold">{successMsg}</p>
+              <p className="text-[10px] text-emerald-700 font-semibold">{successMsg}</p>
             )}
 
             <button
               type="submit"
               disabled={isSubmitting}
-              className="w-full h-10 rounded-xl bg-amber-400 text-slate-950 font-bold text-xs shadow hover:bg-amber-500 active:scale-95 transition-all flex items-center justify-center"
+              className="w-full h-10 rounded-xl bg-blue-600 text-white font-bold text-xs shadow hover:bg-blue-700 active:scale-95 transition-all flex items-center justify-center"
             >
               {isSubmitting ? (
-                <div className="w-4 h-4 border-2 border-slate-950 border-t-transparent rounded-full animate-spin"></div>
+                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
               ) : (
                 'Add Account'
               )}
@@ -723,29 +1274,29 @@ export default function PassbookAccounts({
 
           <div className="flex flex-col gap-3 text-left">
             <div className="flex justify-between items-center">
-              <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">
+              <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500">
                 Registered Accounts ({accounts.length})
               </h3>
-              <div className="text-xs font-extrabold text-slate-200">
-                Live Total: <span className="text-emerald-400">{formatINR(liveTotalBankMoney)}</span>
+              <div className="text-xs font-extrabold text-slate-700">
+                Live Total: <span className="text-blue-700 font-black">{formatINR(liveTotalBankMoney)}</span>
               </div>
             </div>
             
             <div className="flex flex-col gap-2.5 max-h-[35vh] overflow-y-auto no-scrollbar pb-2">
               {accounts.length === 0 ? (
-                <div className="bg-slate-900/20 border border-slate-800/40 rounded-xl p-8 text-center text-slate-500 text-xs font-bold">
+                <div className="bg-white border border-slate-200 rounded-xl p-8 text-center text-slate-400 text-xs font-bold shadow-xs">
                   No bank accounts registered yet.
                 </div>
               ) : (
                 accounts.map((acc) => (
-                  <div key={acc._id} className="bg-slate-900/50 border border-slate-800 p-3 rounded-xl flex justify-between items-center">
+                  <div key={acc._id} className="bg-white border border-slate-200 p-3 rounded-xl flex justify-between items-center shadow-xs">
                     <div className="flex items-center gap-2.5 flex-1 min-w-0">
-                      <div className="p-2 bg-slate-950 rounded-lg border border-slate-850 shrink-0">
-                        <Landmark className="w-4 h-4 text-emerald-400" />
+                      <div className="p-2 bg-blue-50 rounded-lg border border-blue-200 shrink-0 shadow-2xs">
+                        <Landmark className="w-4 h-4 text-blue-600" />
                       </div>
                       <div className="flex flex-col gap-0.5 min-w-0">
-                        <span className="text-xs font-bold text-slate-200 truncate">{acc.bankName}</span>
-                        <span className="text-[9px] text-slate-500">Edit balance manually</span>
+                        <span className="text-xs font-bold text-slate-800 truncate">{acc.bankName}</span>
+                        <span className="text-[9px] text-slate-400">Edit balance manually</span>
                       </div>
                     </div>
                     
@@ -756,7 +1307,7 @@ export default function PassbookAccounts({
                         pattern="[0-9]*"
                         value={editableBalances[acc._id] !== undefined ? editableBalances[acc._id] : ''}
                         onChange={(e) => handleBalanceChange(acc._id, e.target.value)}
-                        className="w-full h-8 px-2 text-right text-xs font-bold bg-slate-950 border border-slate-800 focus:border-amber-500 text-slate-100 rounded focus:outline-none placeholder:text-slate-700"
+                        className="w-full h-8 px-2 text-right text-xs font-black bg-white border border-slate-300 focus:border-blue-600 text-slate-900 rounded focus:outline-none placeholder:text-slate-400 shadow-2xs"
                         placeholder="0"
                       />
                     </div>
@@ -770,10 +1321,10 @@ export default function PassbookAccounts({
                 type="button"
                 onClick={handleSaveAllBalances}
                 disabled={isSubmitting}
-                className="w-full h-10 rounded-xl bg-emerald-500 text-slate-950 font-bold text-xs shadow hover:bg-emerald-600 active:scale-95 transition-all flex items-center justify-center gap-1.5"
+                className="w-full h-10 rounded-xl bg-blue-600 text-white font-bold text-xs shadow hover:bg-blue-700 active:scale-95 transition-all flex items-center justify-center gap-1.5"
               >
                 {isSubmitting ? (
-                  <div className="w-4 h-4 border-2 border-slate-950 border-t-transparent rounded-full animate-spin"></div>
+                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
                 ) : (
                   'Save All Bank Balances'
                 )}
@@ -787,12 +1338,12 @@ export default function PassbookAccounts({
       {activeSubTab === 'reports' && (
         <div className="flex flex-col gap-4">
           <div className="flex flex-col gap-1 text-left">
-            <h3 className="text-sm font-bold text-slate-200 uppercase tracking-wide">Daily EOD Reports</h3>
+            <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wide">Daily EOD Reports</h3>
             <p className="text-[10px] text-slate-500">Chronological snapshot feed of closed daily sessions, cash handbooks, and bank EOD balances.</p>
           </div>
 
           {(dayHistory || []).length === 0 ? (
-            <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-6 text-center text-xs text-slate-500 font-bold">
+            <div className="bg-white border border-slate-200 rounded-2xl p-6 text-center text-xs text-slate-400 font-bold shadow-xs">
               No daily summaries history available yet.
             </div>
           ) : (
@@ -804,68 +1355,171 @@ export default function PassbookAccounts({
                 const dayTxs = (transactions || []).filter(t => t.timestamp.split('T')[0] === day.date);
                 
                 return (
-                  <div key={day.date} className="bg-slate-900/50 border border-slate-850 rounded-2xl p-4 flex flex-col gap-3 text-left">
-                    <div className="flex justify-between items-center border-b border-slate-850 pb-2">
+                  <div key={day.date} className="bg-white border border-slate-200 rounded-2xl p-4 flex flex-col gap-3 text-left shadow-sm">
+                    <div className="flex justify-between items-center border-b border-slate-100 pb-2">
                       <div className="flex items-center gap-1.5">
-                        <Calendar className="w-4 h-4 text-amber-400" />
-                        <span className="text-xs font-bold text-slate-100">{day.date}</span>
+                        <Calendar className="w-4 h-4 text-blue-600" />
+                        <span className="text-xs font-bold text-slate-800">{day.date}</span>
                       </div>
-                      <span className={`px-2 py-0.5 rounded text-[8px] font-bold uppercase tracking-wider ${
-                        isClosed
-                          ? 'bg-red-500/10 border border-red-500/20 text-red-400'
-                          : 'bg-emerald-500/10 border border-emerald-500/20 text-emerald-400'
-                      }`}>
-                        {day.status}
-                      </span>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const onlineTotal = Object.values(day.bankBalances || {}).reduce((s, v) => s + (Number(v) || 0), 0);
+                            setReceiptParams({
+                              dateStr: day.date,
+                              totalCash: day.closingCash,
+                              denominations: day.cashDenominations || {},
+                              onlineAmount: onlineTotal,
+                              accountName: 'SBI Kiosk Cash Calculation',
+                              bankAccounts: day.bankBalances || {}
+                            });
+                            setShowReceiptModal(true);
+                          }}
+                          className="px-2 py-1 bg-blue-50 hover:bg-blue-100 active:scale-95 text-blue-700 border border-blue-200 rounded-lg text-[9px] font-bold flex items-center gap-1 transition-all shadow-xs"
+                        >
+                          <FileText className="w-3 h-3 text-blue-600" /> View Receipt
+                        </button>
+                        <span className={`px-2 py-0.5 rounded text-[8px] font-bold uppercase tracking-wider ${
+                          isClosed
+                            ? 'bg-red-50 border border-red-200 text-red-700'
+                            : 'bg-emerald-50 border border-emerald-200 text-emerald-700'
+                        }`}>
+                          {day.status}
+                        </span>
+                      </div>
                     </div>
 
                     <div className="grid grid-cols-3 gap-2 text-left">
-                      <div className="bg-slate-950/40 p-2 rounded-xl border border-slate-900 flex flex-col gap-0.5">
-                        <span className="text-[8px] text-slate-500 font-bold uppercase">Opening Cash</span>
-                        <span className="text-xs font-bold text-slate-300">{formatINR(day.openingCash)}</span>
+                      <div className="bg-slate-50 p-2 rounded-xl border border-slate-200 flex flex-col gap-0.5 shadow-2xs">
+                        <span className="text-[8px] text-slate-400 font-bold uppercase">Opening Cash</span>
+                        <span className="text-xs font-black text-slate-800">{formatINR(day.openingCash)}</span>
                       </div>
-                      <div className="bg-slate-950/40 p-2 rounded-xl border border-slate-900 flex flex-col gap-0.5">
-                        <span className="text-[8px] text-slate-500 font-bold uppercase">Closing Cash</span>
-                        <span className="text-xs font-bold text-slate-300">{formatINR(day.closingCash)}</span>
+                      <div className="bg-slate-50 p-2 rounded-xl border border-slate-200 flex flex-col gap-0.5 shadow-2xs">
+                        <span className="text-[8px] text-slate-400 font-bold uppercase">Closing Cash</span>
+                        <span className="text-xs font-black text-slate-800">{formatINR(day.closingCash)}</span>
                       </div>
-                      <div className="bg-slate-950/40 p-2 rounded-xl border border-slate-900 flex flex-col gap-0.5">
-                        <span className="text-[8px] text-slate-500 font-bold uppercase">Net Profit</span>
-                        <span className="text-xs font-bold text-emerald-400">{formatINR(day.totalProfit)}</span>
+                      <div className="bg-slate-50 p-2 rounded-xl border border-slate-200 flex flex-col gap-0.5 shadow-2xs">
+                        <span className="text-[8px] text-slate-400 font-bold uppercase">Net Profit</span>
+                        <span className="text-xs font-black text-emerald-600">{formatINR(day.totalProfit)}</span>
                       </div>
                     </div>
 
                     {/* Denomination Notes Breakdown if present */}
                     {day.cashDenominations && (
-                      <div className="bg-slate-950/20 border border-slate-900/60 p-2.5 rounded-xl flex flex-col gap-1 text-[10px]">
-                        <span className="text-[8px] text-slate-500 font-bold uppercase tracking-wider border-b border-slate-900 pb-1">Notes Denomination Snapshot</span>
-                        <div className="flex flex-wrap gap-1.5 mt-1 font-bold text-slate-300">
-                          {day.cashDenominations.n500 > 0 && <span className="bg-slate-900 px-1.5 py-0.5 rounded text-emerald-400">500×{day.cashDenominations.n500}</span>}
-                          {day.cashDenominations.n200 > 0 && <span className="bg-slate-900 px-1.5 py-0.5 rounded text-amber-400">200×{day.cashDenominations.n200}</span>}
-                          {day.cashDenominations.n100 > 0 && <span className="bg-slate-900 px-1.5 py-0.5 rounded text-blue-400">100×{day.cashDenominations.n100}</span>}
-                          {day.cashDenominations.n50 > 0 && <span className="bg-slate-900 px-1.5 py-0.5 rounded text-indigo-400">50×{day.cashDenominations.n50}</span>}
-                          {day.cashDenominations.n20 > 0 && <span className="bg-slate-900 px-1.5 py-0.5 rounded text-orange-400">20×{day.cashDenominations.n20}</span>}
-                          {day.cashDenominations.n10 > 0 && <span className="bg-slate-900 px-1.5 py-0.5 rounded text-purple-400">10×{day.cashDenominations.n10}</span>}
-                          {day.cashDenominations.c20 > 0 && <span className="bg-slate-900 px-1.5 py-0.5 rounded text-yellow-400">c20×{day.cashDenominations.c20}</span>}
-                          {day.cashDenominations.c10 > 0 && <span className="bg-slate-900 px-1.5 py-0.5 rounded text-yellow-400">c10×{day.cashDenominations.c10}</span>}
-                          {day.cashDenominations.c5 > 0 && <span className="bg-slate-900 px-1.5 py-0.5 rounded text-yellow-400">c5×{day.cashDenominations.c5}</span>}
-                          {day.cashDenominations.c2 > 0 && <span className="bg-slate-900 px-1.5 py-0.5 rounded text-yellow-400">c2×{day.cashDenominations.c2}</span>}
-                          {day.cashDenominations.c1 > 0 && <span className="bg-slate-900 px-1.5 py-0.5 rounded text-yellow-400">c1×{day.cashDenominations.c1}</span>}
-                          {day.cashDenominations.coins > 0 && <span className="bg-slate-900 px-1.5 py-0.5 rounded text-yellow-400">Coins: ₹{day.cashDenominations.coins}</span>}
+                      <div className="bg-slate-50 border border-slate-200 p-2.5 rounded-xl flex flex-col gap-1 text-[10px] shadow-2xs">
+                        <span className="text-[8px] text-slate-400 font-bold uppercase tracking-wider border-b border-slate-200 pb-1">Notes Denomination Snapshot</span>
+                        <div className="flex flex-wrap gap-1.5 mt-1 font-bold text-slate-800">
+                          {day.cashDenominations.n500 > 0 && <span className="bg-white border border-slate-200 px-1.5 py-0.5 rounded text-emerald-700">500×{day.cashDenominations.n500}</span>}
+                          {day.cashDenominations.n200 > 0 && <span className="bg-white border border-slate-200 px-1.5 py-0.5 rounded text-amber-700">200×{day.cashDenominations.n200}</span>}
+                          {day.cashDenominations.n100 > 0 && <span className="bg-white border border-slate-200 px-1.5 py-0.5 rounded text-blue-700">100×{day.cashDenominations.n100}</span>}
+                          {day.cashDenominations.n50 > 0 && <span className="bg-white border border-slate-200 px-1.5 py-0.5 rounded text-indigo-700">50×{day.cashDenominations.n50}</span>}
+                          {day.cashDenominations.n20 > 0 && <span className="bg-white border border-slate-200 px-1.5 py-0.5 rounded text-orange-700">20×{day.cashDenominations.n20}</span>}
+                          {day.cashDenominations.n10 > 0 && <span className="bg-white border border-slate-200 px-1.5 py-0.5 rounded text-purple-700">10×{day.cashDenominations.n10}</span>}
+                          {day.cashDenominations.c20 > 0 && <span className="bg-white border border-slate-200 px-1.5 py-0.5 rounded text-amber-700">c20×{day.cashDenominations.c20}</span>}
+                          {day.cashDenominations.c10 > 0 && <span className="bg-white border border-slate-200 px-1.5 py-0.5 rounded text-amber-700">c10×{day.cashDenominations.c10}</span>}
+                          {day.cashDenominations.c5 > 0 && <span className="bg-white border border-slate-200 px-1.5 py-0.5 rounded text-amber-700">c5×{day.cashDenominations.c5}</span>}
+                          {day.cashDenominations.c2 > 0 && <span className="bg-white border border-slate-200 px-1.5 py-0.5 rounded text-amber-700">c2×{day.cashDenominations.c2}</span>}
+                          {day.cashDenominations.c1 > 0 && <span className="bg-white border border-slate-200 px-1.5 py-0.5 rounded text-amber-700">c1×{day.cashDenominations.c1}</span>}
+                          {day.cashDenominations.coins > 0 && <span className="bg-white border border-slate-200 px-1.5 py-0.5 rounded text-amber-700">Coins: ₹{day.cashDenominations.coins}</span>}
                         </div>
                       </div>
                     )}
 
                     {balancesArray.length > 0 && (
-                      <div className="bg-slate-950/20 border border-slate-900/80 p-2.5 rounded-xl flex flex-col gap-1.5 text-left">
-                        <span className="text-[8px] text-slate-500 font-bold uppercase tracking-wider border-b border-slate-900 pb-1">Bank Balances at Close</span>
+                      <div className="bg-slate-50 border border-slate-200 p-2.5 rounded-xl flex flex-col gap-1.5 text-left shadow-2xs">
+                        <span className="text-[8px] text-slate-400 font-bold uppercase tracking-wider border-b border-slate-200 pb-1">Bank Balances at Close</span>
                         <div className="grid grid-cols-2 gap-2">
                           {balancesArray.map(([bank, bal]) => (
                             <div key={bank} className="flex justify-between items-center text-[10px]">
-                              <span className="text-slate-400 font-semibold truncate max-w-[80px]">{bank}</span>
-                              <span className="text-slate-100 font-bold">{formatINR(bal)}</span>
+                              <span className="text-slate-600 font-semibold truncate max-w-[80px]">{bank}</span>
+                              <span className="text-blue-900 font-bold">{formatINR(bal)}</span>
                             </div>
                           ))}
                         </div>
+                      </div>
+                    )}
+
+                    {/* Expandable All Transactions (Date & Time Wise) */}
+                    <button
+                      type="button"
+                      onClick={() => setExpandedDays(prev => ({ ...prev, [day.date]: !prev[day.date] }))}
+                      className="w-full py-2 px-3 bg-slate-50 hover:bg-slate-100 active:scale-[0.99] text-slate-700 rounded-xl text-[10px] font-extrabold flex items-center justify-between transition-all border border-slate-200 shadow-2xs"
+                    >
+                      <span className="flex items-center gap-1.5">
+                        <ClipboardList className="w-3.5 h-3.5 text-blue-600" />
+                        Transactions on {day.date} ({dayTxs.length} entries)
+                      </span>
+                      <span className="text-[10px] text-blue-600 font-bold">
+                        {expandedDays[day.date] ? '▲ Collapse' : '▼ View Records'}
+                      </span>
+                    </button>
+
+                    {expandedDays[day.date] && (
+                      <div className="flex flex-col gap-2 bg-slate-50 p-2.5 rounded-xl border border-slate-200 max-h-[320px] overflow-y-auto no-scrollbar">
+                        <div className="flex justify-between items-center text-[9px] font-bold uppercase tracking-wider text-slate-500 pb-1 border-b border-slate-200">
+                          <span>Time & Details</span>
+                          <span>Amounts & Notes</span>
+                        </div>
+
+                        {dayTxs.length === 0 ? (
+                          <div className="text-[10px] text-slate-400 italic py-3 text-center">
+                            No individual transactions logged on this day.
+                          </div>
+                        ) : (
+                          dayTxs.map(tx => {
+                            const tStr = new Date(tx.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                            const bName = tx.bankAccountId?.bankName || 'Local Bank';
+                            const isUdhar = tx.commissionMode === 'Udhar';
+                            const isJama = tx.type === 'Jama' || tx.commissionMode === 'Jama';
+
+                            return (
+                              <div key={tx._id} className="bg-white p-2.5 rounded-lg border border-slate-200 flex flex-col gap-1 text-[10px] shadow-2xs">
+                                <div className="flex justify-between items-start">
+                                  <div className="flex flex-col text-left">
+                                    <div className="flex items-center gap-1 font-bold text-slate-800">
+                                      <span className="text-slate-400">{tStr}</span>
+                                      <span>•</span>
+                                      <span className="text-blue-700 font-extrabold">{bName}</span>
+                                      {isUdhar && <span className="text-[8px] bg-rose-50 text-rose-700 px-1 py-0.2 rounded border border-rose-200">UDHAR</span>}
+                                      {isJama && <span className="text-[8px] bg-emerald-50 text-emerald-700 px-1 py-0.2 rounded border border-emerald-200">JAMA</span>}
+                                    </div>
+                                    <span className="text-[9px] text-slate-500 mt-0.5">
+                                      Customer: <span className="font-bold text-slate-800">{tx.customerName || 'Walk-in'}</span>
+                                    </span>
+                                  </div>
+
+                                  <div className="text-right flex flex-col items-end">
+                                    <span className={`font-black ${isUdhar ? 'text-rose-600' : isJama ? 'text-emerald-600' : (tx.customerAmount >= 0 ? 'text-emerald-600' : 'text-rose-600')}`}>
+                                      {isUdhar ? `₹${Math.abs(tx.cashOut || tx.customerAmount)} UDHAR` : isJama ? `+${formatINR(Math.abs(tx.customerAmount || tx.cashOut))} JAMA` : (tx.customerAmount >= 0 ? '+' : '') + formatINR(tx.customerAmount)}
+                                    </span>
+                                    <span className="text-[8.5px] text-slate-500">
+                                      {tx.cashOut > 0 ? `Cash Out: -${formatINR(tx.cashOut)}` : `Cash In: +${formatINR(Math.abs(tx.cashOut))}`}
+                                    </span>
+                                  </div>
+                                </div>
+
+                                {/* Notes Detail */}
+                                {tx.noteDetails && (
+                                  <div className="pt-1 border-t border-slate-100 flex justify-between items-center text-[8px] font-bold">
+                                    {tx.noteDetails.includes('Skipped') ? (
+                                      <span className="bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded border border-slate-200">
+                                        ⏳ Notes: Skipped (Counted at Close)
+                                      </span>
+                                    ) : (
+                                      <span className="bg-emerald-50 text-emerald-800 px-1.5 py-0.5 rounded border border-emerald-200">
+                                        💵 Notes: {tx.noteDetails}
+                                      </span>
+                                    )}
+                                    <span className="text-emerald-700 font-semibold">
+                                      +{formatINR(tx.profit)} profit
+                                    </span>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })
+                        )}
                       </div>
                     )}
                   </div>
@@ -874,6 +1528,55 @@ export default function PassbookAccounts({
             </div>
           )}
         </div>
+      )}
+
+      {/* Denomination Note Calculator Modal for Passbook Cash Addition */}
+      <DenominationModal
+        isOpen={showDenomModal}
+        onClose={() => setShowDenomModal(false)}
+        initialDenominations={denoms}
+        onSave={(totalCash, updatedDenoms) => {
+          handleSaveDenoms(totalCash, updatedDenoms);
+        }}
+        onPreviewReceipt={(totalCash, updatedDenoms) => {
+          setReceiptParams({
+            dateStr: activeDay?.date || new Date().toISOString().split('T')[0],
+            totalCash,
+            denominations: updatedDenoms,
+            onlineAmount: liveTotalBankMoney,
+            accountName: 'SBI Kiosk Cash Calculation',
+            bankAccounts: getLiveBankAccountsList()
+          });
+          setShowReceiptModal(true);
+        }}
+        title="Passbook Physical Cash & Note Counter"
+      />
+
+      {/* Closing Day Physical Cash Denomination Modal for Passbook */}
+      <DenominationModal
+        isOpen={showCloseDenomModal}
+        onClose={() => setShowCloseDenomModal(false)}
+        initialDenominations={closeDenoms}
+        onSave={(totalCash, closingDenomsPayload) => {
+          setCloseDenoms(closingDenomsPayload);
+          executeCloseFromPassbook(totalCash, closingDenomsPayload);
+        }}
+        title="Closing Physical Cash Notes"
+      />
+
+      {/* Cash Statement Receipt Modal */}
+      {receiptParams && (
+        <CashStatementReceipt
+          isOpen={showReceiptModal}
+          onClose={() => setShowReceiptModal(false)}
+          dateStr={receiptParams.dateStr}
+          accountName={receiptParams.accountName}
+          denominations={receiptParams.denominations}
+          totalCash={receiptParams.totalCash}
+          onlineAmount={receiptParams.onlineAmount}
+          bankAccounts={receiptParams.bankAccounts || getLiveBankAccountsList()}
+          kioskTitle="SBI Kiosk"
+        />
       )}
     </div>
   );

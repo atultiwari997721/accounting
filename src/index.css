@@ -4,9 +4,8 @@
 
 @layer base {
   body {
-    @apply bg-slate-950 text-slate-100 antialiased overflow-x-hidden;
-    /* Prevent iOS elastic scrolling from breaking the dark-theme feel */
-    background-color: #020617;
+    @apply bg-slate-50 text-slate-900 antialiased overflow-x-hidden;
+    background-color: #f8fafc;
   }
 }
 
@@ -21,9 +20,28 @@
 
 /* Custom transitions and states for keypads */
 .active-press:active {
-  background-color: rgba(30, 41, 59, 0.9);
+  background-color: rgba(226, 232, 240, 0.9);
   transform: scale(0.95);
 }
 .keypad-btn {
-  @apply w-16 h-16 rounded-full bg-slate-900 border border-slate-800 text-slate-100 flex items-center justify-center text-xl font-bold transition-all duration-75 active:scale-95 active:bg-slate-800 focus:outline-none select-none;
+  @apply w-16 h-16 rounded-full bg-white border border-slate-200 text-slate-800 shadow-sm flex items-center justify-center text-xl font-bold transition-all duration-75 active:scale-95 active:bg-slate-100 focus:outline-none select-none;
+}
+
+/* Receipt Print Styling */
+@media print {
+  body {
+    background-color: white !important;
+    color: black !important;
+  }
+  .no-print, nav, header {
+    display: none !important;
+  }
+  #printable-receipt {
+    box-shadow: none !important;
+    border: none !important;
+    padding: 0 !important;
+    margin: 0 auto !important;
+    width: 100% !important;
+    max-width: 360px !important;
+  }
 }

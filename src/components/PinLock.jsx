@@ -310,35 +310,35 @@ export default function PinLock({ onUnlock }) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-950 flex flex-col justify-between items-center py-8 px-6 select-none max-w-md mx-auto h-full border-x border-slate-900 shadow-2xl overflow-y-auto no-scrollbar">
+    <div className="fixed inset-0 z-50 bg-slate-50 flex flex-col justify-between items-center py-8 px-6 select-none max-w-md mx-auto h-full border-x border-slate-200 shadow-xl overflow-y-auto no-scrollbar">
       {/* Header / Brand */}
       <div className="text-center mt-2 flex flex-col items-center">
-        <div className="p-3 bg-amber-500/10 rounded-full border border-amber-500/20 w-fit mb-2">
-          <Lock className="w-7 h-7 text-amber-400" />
+        <div className="p-3.5 bg-blue-50 rounded-full border border-blue-200 w-fit mb-2 shadow-xs">
+          <Lock className="w-7 h-7 text-blue-600" />
         </div>
-        <h1 className="text-lg font-extrabold tracking-wide text-slate-100 uppercase">Kiosk Cash Manager</h1>
-        <p className="text-[10px] text-slate-400 mt-0.5">Device Protection & Ledger Encryption Active</p>
+        <h1 className="text-lg font-extrabold tracking-wide text-blue-950 uppercase">SBI Kiosk Cash Manager</h1>
+        <p className="text-[10px] text-slate-500 mt-0.5 font-medium">Device Protection & Ledger Encryption Active</p>
       </div>
 
       {mode === 'setup' ? (
         /* SETUP MODE FORM */
         <form onSubmit={handleRegisterSubmit} className="w-full flex-1 flex flex-col justify-center gap-3.5 my-4 text-left max-w-xs">
-          <h2 className="text-sm font-bold text-slate-300 uppercase tracking-wide text-center mb-1">Owner Registration</h2>
+          <h2 className="text-xs font-bold text-slate-700 uppercase tracking-wide text-center mb-1">Owner Registration</h2>
           
           <div className="flex flex-col gap-1">
-            <label className="text-[9px] uppercase font-bold tracking-wider text-slate-400">Set User ID</label>
+            <label className="text-[9px] uppercase font-bold tracking-wider text-slate-500">Set User ID</label>
             <input
               type="text"
               required
               placeholder="e.g. admin"
               value={userId}
               onChange={(e) => setUserId(e.target.value.replace(/[^a-zA-Z0-9_]/g, ''))}
-              className="h-10 px-3 bg-slate-900 border border-slate-850 focus:border-amber-500 rounded-xl text-xs text-slate-100 font-bold focus:outline-none"
+              className="h-10 px-3 bg-white border border-slate-300 focus:border-blue-600 rounded-xl text-xs text-slate-900 font-bold focus:outline-none shadow-xs"
             />
           </div>
 
           <div className="flex flex-col gap-1">
-            <label className="text-[9px] uppercase font-bold tracking-wider text-slate-400">Set Account Password</label>
+            <label className="text-[9px] uppercase font-bold tracking-wider text-slate-500">Set Account Password</label>
             <input
               type="password"
               required
@@ -346,35 +346,35 @@ export default function PinLock({ onUnlock }) {
               placeholder="Minimum 6 characters"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="h-10 px-3 bg-slate-900 border border-slate-850 focus:border-amber-500 rounded-xl text-xs text-slate-100 focus:outline-none"
+              className="h-10 px-3 bg-white border border-slate-300 focus:border-blue-600 rounded-xl text-xs text-slate-900 focus:outline-none shadow-xs"
             />
           </div>
 
           <div className="grid grid-cols-2 gap-2">
             <div className="flex flex-col gap-1">
-              <label className="text-[9px] uppercase font-bold tracking-wider text-slate-400">4-Digit PIN</label>
+              <label className="text-[9px] uppercase font-bold tracking-wider text-slate-500">4-Digit PIN</label>
               <input
                 type="password"
                 readOnly
                 value={pin}
                 placeholder="Type in Keypad"
-                className="h-10 text-center bg-slate-900 border border-slate-850 rounded-xl text-xs text-slate-100 font-bold focus:outline-none placeholder:text-[10px]"
+                className="h-10 text-center bg-white border border-slate-300 rounded-xl text-xs text-slate-900 font-bold focus:outline-none placeholder:text-[10px] shadow-xs"
               />
             </div>
             <div className="flex flex-col gap-1">
-              <label className="text-[9px] uppercase font-bold tracking-wider text-slate-400">Confirm PIN</label>
+              <label className="text-[9px] uppercase font-bold tracking-wider text-slate-500">Confirm PIN</label>
               <input
                 type="password"
                 readOnly
                 value={confirmPin}
                 placeholder="Type in Keypad"
-                className="h-10 text-center bg-slate-900 border border-slate-850 rounded-xl text-xs text-slate-100 font-bold focus:outline-none placeholder:text-[10px]"
+                className="h-10 text-center bg-white border border-slate-300 rounded-xl text-xs text-slate-900 font-bold focus:outline-none placeholder:text-[10px] shadow-xs"
               />
             </div>
           </div>
 
           {/* Setup keypad buttons */}
-          <div className="grid grid-cols-3 gap-2 justify-items-center w-fit mx-auto mt-1 bg-slate-950 p-1.5 rounded-2xl border border-slate-900">
+          <div className="grid grid-cols-3 gap-2 justify-items-center w-fit mx-auto mt-1 bg-slate-100 p-2 rounded-2xl border border-slate-200">
             {['1','2','3','4','5','6','7','8','9','C','0','⌫'].map(btn => (
               <button
                 key={btn}
@@ -384,7 +384,7 @@ export default function PinLock({ onUnlock }) {
                   else if (btn === '⌫') handleBackspace();
                   else handleKeypadPress(btn);
                 }}
-                className="w-10 h-10 rounded-full bg-slate-900 hover:bg-slate-850 border border-slate-800 text-slate-100 flex items-center justify-center text-sm font-bold active:scale-95 transition-all"
+                className="w-10 h-10 rounded-full bg-white hover:bg-slate-50 border border-slate-200 text-slate-800 shadow-xs flex items-center justify-center text-sm font-bold active:scale-95 transition-all"
               >
                 {btn}
               </button>
@@ -396,15 +396,15 @@ export default function PinLock({ onUnlock }) {
               type="checkbox"
               checked={rememberDevice}
               onChange={(e) => setRememberDevice(e.target.checked)}
-              className="w-3.5 h-3.5 accent-amber-500 rounded border-slate-800 bg-slate-900"
+              className="w-3.5 h-3.5 accent-blue-600 rounded border-slate-300 bg-white"
             />
-            <span className="text-[10px] text-slate-400 font-medium">Remember User ID on this device</span>
+            <span className="text-[10px] text-slate-600 font-medium">Remember User ID on this device</span>
           </label>
 
           <button
             type="submit"
             disabled={isSubmitting}
-            className="h-11 mt-2 w-full bg-amber-500 hover:bg-amber-600 active:scale-95 transition-all text-slate-950 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5"
+            className="h-11 mt-2 w-full bg-blue-600 hover:bg-blue-700 active:scale-95 transition-all text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 shadow-sm"
           >
             <ShieldCheck className="w-4 h-4" /> Save Account & Biometrics
           </button>
@@ -414,27 +414,27 @@ export default function PinLock({ onUnlock }) {
         <div className="w-full flex-1 flex flex-col justify-center items-center gap-4 my-2 max-w-xs">
           
           {/* Method tabs selector */}
-          <div className="flex gap-1 p-1 bg-slate-950 rounded-xl border border-slate-900 w-full mb-1">
+          <div className="flex gap-1 p-1 bg-slate-100 rounded-xl border border-slate-200 w-full mb-1">
             <button
               onClick={() => { setAuthMethod('fingerprint'); setErrorMsg(''); handleVerifyBiometrics(); }}
               className={`flex-1 h-8 rounded-lg text-[10px] font-bold transition-all flex items-center justify-center gap-1 ${
-                authMethod === 'fingerprint' ? 'bg-amber-400 text-slate-950 shadow-md' : 'text-slate-400 hover:text-slate-200'
+                authMethod === 'fingerprint' ? 'bg-blue-600 text-white shadow-xs' : 'text-slate-600 hover:text-slate-900'
               }`}
             >
-              <Fingerprint className="w-3.5 h-3.5" /> Fingerprint (Primary)
+              <Fingerprint className="w-3.5 h-3.5" /> Fingerprint
             </button>
             <button
               onClick={() => { setAuthMethod('pin'); handleClear(); setErrorMsg(''); }}
               className={`flex-1 h-8 rounded-lg text-[10px] font-bold transition-all flex items-center justify-center gap-1 ${
-                authMethod === 'pin' ? 'bg-amber-400 text-slate-950 shadow-md' : 'text-slate-400 hover:text-slate-200'
+                authMethod === 'pin' ? 'bg-blue-600 text-white shadow-xs' : 'text-slate-600 hover:text-slate-900'
               }`}
             >
-              <Keyboard className="w-3.5 h-3.5" /> PIN Keypad (Secondary)
+              <Keyboard className="w-3.5 h-3.5" /> PIN Keypad
             </button>
             <button
               onClick={() => { setAuthMethod('password'); setErrorMsg(''); }}
               className={`flex-1 h-8 rounded-lg text-[10px] font-bold transition-all flex items-center justify-center gap-1 ${
-                authMethod === 'password' ? 'bg-amber-400 text-slate-950 shadow-md' : 'text-slate-400 hover:text-slate-200'
+                authMethod === 'password' ? 'bg-blue-600 text-white shadow-xs' : 'text-slate-600 hover:text-slate-900'
               }`}
             >
               <Key className="w-3.5 h-3.5" /> Password
@@ -443,31 +443,31 @@ export default function PinLock({ onUnlock }) {
 
           <form onSubmit={handleLoginVerify} className="w-full flex flex-col gap-3 text-left">
             <div className="flex flex-col gap-1">
-              <label className="text-[9px] uppercase font-bold tracking-wider text-slate-400">User ID</label>
+              <label className="text-[9px] uppercase font-bold tracking-wider text-slate-500">User ID</label>
               <input
                 type="text"
                 required
                 placeholder="User ID"
                 value={userId}
                 onChange={(e) => setUserId(e.target.value.replace(/[^a-zA-Z0-9_]/g, ''))}
-                className="h-10 px-3 bg-slate-900 border border-slate-850 focus:border-amber-500 rounded-xl text-xs text-slate-100 font-bold focus:outline-none"
+                className="h-10 px-3 bg-white border border-slate-300 focus:border-blue-600 rounded-xl text-xs text-slate-900 font-bold focus:outline-none shadow-xs"
               />
             </div>
 
             {authMethod === 'password' && (
               <div className="flex flex-col gap-1">
-                <label className="text-[9px] uppercase font-bold tracking-wider text-slate-400">Password</label>
+                <label className="text-[9px] uppercase font-bold tracking-wider text-slate-500">Password</label>
                 <input
                   type="password"
                   required
                   placeholder="Enter Password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  className="h-10 px-3 bg-slate-900 border border-slate-850 focus:border-amber-500 rounded-xl text-xs text-slate-100 focus:outline-none"
+                  className="h-10 px-3 bg-white border border-slate-300 focus:border-blue-600 rounded-xl text-xs text-slate-900 focus:outline-none shadow-xs"
                 />
                 <button
                   type="submit"
-                  className="h-11 mt-3 w-full bg-amber-500 hover:bg-amber-600 active:scale-95 transition-all text-slate-950 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5"
+                  className="h-11 mt-3 w-full bg-blue-600 hover:bg-blue-700 active:scale-95 transition-all text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 shadow-sm"
                 >
                   Verify Password
                 </button>
@@ -483,15 +483,15 @@ export default function PinLock({ onUnlock }) {
                       key={idx}
                       className={`w-3.5 h-3.5 rounded-full border-2 transition-all duration-100 ${
                         idx < pin.length
-                          ? 'bg-amber-400 border-amber-400 scale-110 shadow-[0_0_8px_rgba(251,191,36,0.5)]'
-                          : 'bg-transparent border-slate-700'
+                          ? 'bg-blue-600 border-blue-600 scale-110 shadow-[0_0_8px_rgba(37,99,235,0.4)]'
+                          : 'bg-transparent border-slate-300'
                       }`}
                     />
                   ))}
                 </div>
 
                 {/* Keypad */}
-                <div className="grid grid-cols-3 gap-2 bg-slate-950 p-2 rounded-2xl border border-slate-900">
+                <div className="grid grid-cols-3 gap-2 bg-slate-100 p-2.5 rounded-2xl border border-slate-200">
                   {['1','2','3','4','5','6','7','8','9','C','0','⌫'].map(btn => (
                     <button
                       key={btn}
@@ -501,7 +501,7 @@ export default function PinLock({ onUnlock }) {
                         else if (btn === '⌫') handleBackspace();
                         else handleKeypadPress(btn);
                       }}
-                      className="w-12 h-12 rounded-full bg-slate-900 border border-slate-850 hover:bg-slate-850 hover:border-slate-700 text-slate-100 flex items-center justify-center text-lg font-extrabold active:scale-95 transition-all"
+                      className="w-12 h-12 rounded-full bg-white border border-slate-200 hover:bg-slate-50 hover:border-slate-300 text-slate-800 shadow-xs flex items-center justify-center text-lg font-extrabold active:scale-95 transition-all"
                     >
                       {btn}
                     </button>
@@ -515,12 +515,12 @@ export default function PinLock({ onUnlock }) {
                 <button
                   type="button"
                   onClick={handleVerifyBiometrics}
-                  className="w-20 h-20 rounded-full bg-amber-500/10 border border-amber-500/30 hover:border-amber-500 flex items-center justify-center hover:scale-105 active:scale-95 transition-all group"
+                  className="w-20 h-20 rounded-full bg-blue-50 border border-blue-200 hover:border-blue-500 flex items-center justify-center hover:scale-105 active:scale-95 transition-all group shadow-xs"
                 >
-                  <Fingerprint className="w-10 h-10 text-amber-400 group-hover:scale-110 transition-all animate-pulse" />
+                  <Fingerprint className="w-10 h-10 text-blue-600 group-hover:scale-110 transition-all animate-pulse" />
                 </button>
                 <div className="flex flex-col gap-0.5">
-                  <span className="text-xs text-slate-300 font-semibold">Touch Fingerprint Sensor</span>
+                  <span className="text-xs text-slate-700 font-semibold">Touch Fingerprint Sensor</span>
                   <span className="text-[8px] text-slate-500 leading-normal px-4">Verify using device biometrics (Windows Hello, FaceID, or TouchID)</span>
                 </div>
               </div>
@@ -532,16 +532,16 @@ export default function PinLock({ onUnlock }) {
       {/* Footer message / feedback */}
       <div className="w-full flex flex-col items-center gap-1.5 mt-2 max-w-xs">
         {errorMsg && (
-          <p className="text-[10px] font-semibold text-red-400 flex items-center gap-1 text-center leading-normal">
+          <p className="text-[10px] font-semibold text-red-600 flex items-center gap-1 text-center leading-normal">
             <AlertCircle className="w-3.5 h-3.5 shrink-0" /> {errorMsg}
           </p>
         )}
         {successMsg && (
-          <p className="text-[10px] font-semibold text-emerald-400 flex items-center gap-1 text-center leading-normal">
+          <p className="text-[10px] font-semibold text-emerald-700 flex items-center gap-1 text-center leading-normal">
             <Check className="w-3.5 h-3.5 shrink-0" /> {successMsg}
           </p>
         )}
-        <div className="text-center text-[8px] text-slate-600 flex items-center gap-1 mt-1">
+        <div className="text-center text-[8px] text-slate-400 flex items-center gap-1 mt-1">
           <EyeOff className="w-2.5 h-2.5" /> Screen shielded. Passwords and biometrics are stored locally.
         </div>
       </div>
