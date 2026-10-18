@@ -75,8 +75,15 @@ export default function Settings({
 
     if (bioActive) {
       localStorage.setItem(`kiosk_biometrics_registered_${ownerId}`, 'false');
+      localStorage.removeItem('kiosk_bio_credential_id');
       setBioActive(false);
       setActionSuccess('Biometrics disabled. App will default to PIN keypad login.');
+      return;
+    }
+
+    const isSecure = window.isSecureContext || window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+    if (!isSecure && window.location.hostname !== 'localhost') {
+      setActionError('Mobile browsers require HTTPS for biometric sensors. On local WiFi (HTTP), use 4-Digit PIN.');
       return;
     }
 
@@ -88,33 +95,56 @@ export default function Settings({
     try {
       const challenge = new Uint8Array(32);
       window.crypto.getRandomValues(challenge);
+      const hostname = window.location.hostname;
+      const isIp = !hostname || /^(\d{1,3}\.){3}\d{1,3}$/.test(hostname) || hostname === '[::1]';
 
       const createOptions = {
         challenge,
-        rp: { name: "Kiosk Ledger" },
-        rpId: window.location.hostname,
+        rp: { 
+          name: "SBI Kiosk Ledger",
+          ...(!isIp ? { id: hostname } : {})
+        },
         user: {
           id: new TextEncoder().encode(ownerId),
           name: ownerId,
-          displayName: ownerId
+          displayName: `SBI Kiosk (${ownerId})`
         },
-        pubKeyCredParams: [{ alg: -7, type: "public-key" }, { alg: -257, type: "public-key" }],
+        pubKeyCredParams: [
+          { alg: -7, type: "public-key" },  // ES256 (Android/iOS)
+          { alg: -257, type: "public-key" } // RS256 (Windows)
+        ],
         timeout: 60000,
         authenticatorSelection: {
           authenticatorAttachment: "platform",
-          userVerification: "required"
-        }
+          residentKey: "preferred",
+          requireResidentKey: false,
+          userVerification: "preferred"
+        },
+        attestation: "none"
       };
 
-      await navigator.credentials.create({ publicKey: createOptions });
-      localStorage.setItem(`kiosk_biometrics_registered_${ownerId}`, 'true');
-      setBioActive(true);
-      setActionSuccess('Biometric Fingerprint activated! Biometrics will be requested first on login, followed by PIN secondary.');
+      const credential = await navigator.credentials.create({ publicKey: createOptions });
+      if (credential && credential.rawId) {
+        const bytes = new Uint8Array(credential.rawId);
+        let binary = '';
+        for (let i = 0; i < bytes.byteLength; i++) {
+          binary += String.fromCharCode(bytes[i]);
+        }
+        localStorage.setItem('kiosk_bio_credential_id', btoa(binary));
+        localStorage.setItem(`kiosk_biometrics_registered_${ownerId}`, 'true');
+        setBioActive(true);
+        setActionSuccess('Mobile Biometric Fingerprint activated! You can now unlock using your fingerprint sensor.');
+      }
     } catch (err) {
       console.warn('Biometric setup failed or skipped:', err);
-      localStorage.setItem(`kiosk_biometrics_registered_${ownerId}`, 'true');
-      setBioActive(true);
-      setActionSuccess('Biometric preference enabled for your device!');
+      const rawMsg = err?.message || '';
+      if (err?.name === 'NotAllowedError' || rawMsg.includes('cancelled') || rawMsg.includes('canceled')) {
+        setActionError('Fingerprint registration cancelled by user.');
+      } else if (err?.name === 'SecurityError') {
+        setActionError('HTTPS required: Mobile browsers only allow hardware biometrics over secure HTTPS.');
+      } else {
+        setActionError(rawMsg || 'Failed to activate device biometrics.');
+      }
     }
   };
 

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Lock, EyeOff, ShieldCheck, Fingerprint, Keyboard, Key, Check, AlertCircle, RefreshCw, Sparkles, HelpCircle } from 'lucide-react';
+import { Lock, EyeOff, ShieldCheck, Fingerprint, Keyboard, Key, Check, AlertCircle, RefreshCw, Sparkles, HelpCircle, Smartphone, AlertTriangle } from 'lucide-react';
 
 // Secure zero-dependency SHA-256 helper
 async function sha256(message) {
@@ -13,15 +13,41 @@ async function sha256(message) {
 const DEFAULT_PIN = "1234";
 const DEFAULT_PIN_HASH = "03ac674216f3e15c761ee1a5e255f067953623c8b388b4459e13f978d7c846f4";
 
+// Helper for Base64 <-> ArrayBuffer
+function bufferToBase64(buffer) {
+  const bytes = new Uint8Array(buffer);
+  let binary = '';
+  for (let i = 0; i < bytes.byteLength; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary);
+}
+
+function base64ToBuffer(base64) {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes.buffer;
+}
+
+// Check if hostname is an IP address
+function getValidRpId() {
+  const hostname = window.location.hostname;
+  if (!hostname || /^(\d{1,3}\.){3}\d{1,3}$/.test(hostname) || hostname === '[::1]') {
+    return undefined; // W3C WebAuthn spec requires rpId to be omitted if IP address
+  }
+  return hostname;
+}
+
 export default function PinLock({ onUnlock }) {
-  const [mode, setMode] = useState('verify'); // 'setup' | 'verify'
   const [authMethod, setAuthMethod] = useState('pin'); // 'pin' | 'password' | 'fingerprint'
 
   // Input states
-  const [userId, setUserId] = useState('');
+  const [userId, setUserId] = useState('admin');
   const [password, setPassword] = useState('');
   const [pin, setPin] = useState('');
-  const [confirmPin, setConfirmPin] = useState('');
   const [rememberDevice, setRememberDevice] = useState(true);
 
   // Status states
@@ -32,45 +58,134 @@ export default function PinLock({ onUnlock }) {
   const [showForgotModal, setShowForgotModal] = useState(false);
   const [newPinInput, setNewPinInput] = useState('');
 
-  // Initialize and check credentials
+  // Mobile WebAuthn readiness state
+  const [isSecureContext, setIsSecureContext] = useState(true);
+  const [bioSupported, setBioSupported] = useState(false);
+  const [bioRegistered, setBioRegistered] = useState(false);
+
   useEffect(() => {
     try {
       const storedPin = localStorage.getItem('kiosk_pin_hash');
-      const ownerId = localStorage.getItem('kiosk_owner_userid');
+      const ownerId = localStorage.getItem('kiosk_owner_userid') || 'admin';
       const remembered = localStorage.getItem('kiosk_remembered_userid');
+      const credId = localStorage.getItem('kiosk_bio_credential_id');
 
-      if (remembered) {
-        setUserId(remembered);
-      } else if (ownerId) {
-        setUserId(ownerId);
-      } else {
-        setUserId('admin');
-      }
+      if (remembered) setUserId(remembered);
+      else setUserId(ownerId);
 
-      // If no PIN has ever been set, set default PIN 1234 so app is always accessible
+      // Default PIN 1234 guarantee
       if (!storedPin) {
         localStorage.setItem('kiosk_pin_hash', DEFAULT_PIN_HASH);
-        if (!ownerId) {
-          localStorage.setItem('kiosk_owner_userid', 'admin');
-        }
+        localStorage.setItem('kiosk_owner_userid', 'admin');
       }
 
-      setMode('verify');
-      setAuthMethod('pin');
+      // Check secure context
+      const secure = window.isSecureContext || window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+      setIsSecureContext(secure);
+
+      const hasWebAuthn = !!(window.PublicKeyCredential && navigator.credentials);
+      setBioSupported(hasWebAuthn);
+      setBioRegistered(!!credId);
     } catch (e) {
       console.warn('Initialization error in PinLock:', e);
-      setMode('verify');
     }
   }, []);
+
+  // WebAuthn Biometric Registration (Works on Android Chrome, iOS Safari, Windows)
+  const handleRegisterBiometrics = async () => {
+    setErrorMsg('');
+    setSuccessMsg('');
+
+    if (!isSecureContext && window.location.hostname !== 'localhost') {
+      setErrorMsg('Biometrics on mobile require HTTPS. On local network HTTP, please use 4-Digit PIN.');
+      return;
+    }
+
+    if (!window.PublicKeyCredential) {
+      setErrorMsg('Biometric authentication is not supported in this browser.');
+      return;
+    }
+
+    try {
+      setIsSubmitting(true);
+      const ownerId = localStorage.getItem('kiosk_owner_userid') || 'admin';
+      const challenge = new Uint8Array(32);
+      window.crypto.getRandomValues(challenge);
+      const userIdBytes = new TextEncoder().encode(ownerId);
+      const rpId = getValidRpId();
+
+      const createOptions = {
+        challenge,
+        rp: {
+          name: 'SBI Kiosk Ledger',
+          ...(rpId ? { id: rpId } : {})
+        },
+        user: {
+          id: userIdBytes,
+          name: ownerId,
+          displayName: `SBI Kiosk (${ownerId})`
+        },
+        pubKeyCredParams: [
+          { alg: -7, type: 'public-key' },  // ES256 (Mobile Android & iOS)
+          { alg: -257, type: 'public-key' } // RS256 (Windows Hello)
+        ],
+        timeout: 60000,
+        authenticatorSelection: {
+          authenticatorAttachment: 'platform',
+          residentKey: 'preferred',
+          requireResidentKey: false,
+          userVerification: 'preferred'
+        },
+        attestation: 'none'
+      };
+
+      const credential = await navigator.credentials.create({ publicKey: createOptions });
+      if (credential && credential.rawId) {
+        const credIdBase64 = bufferToBase64(credential.rawId);
+        localStorage.setItem('kiosk_bio_credential_id', credIdBase64);
+        localStorage.setItem(`kiosk_biometrics_registered_${ownerId}`, 'true');
+        setBioRegistered(true);
+        setSuccessMsg('Fingerprint registered successfully! Unlocking...');
+        setTimeout(() => {
+          onUnlock();
+        }, 500);
+      }
+    } catch (err) {
+      console.warn('Biometric registration error:', err);
+      const rawMsg = err?.message || '';
+      if (err?.name === 'NotAllowedError' || rawMsg.includes('cancelled') || rawMsg.includes('canceled')) {
+        setErrorMsg('Fingerprint registration cancelled. Tap to try again or use PIN.');
+      } else if (err?.name === 'SecurityError') {
+        setErrorMsg('Mobile browsers require HTTPS for biometrics. Please use 4-Digit PIN.');
+      } else {
+        setErrorMsg(rawMsg || 'Device biometric registration failed. Use 4-Digit PIN.');
+      }
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
 
   // WebAuthn Biometric Verification
   const handleVerifyBiometrics = async () => {
     setErrorMsg('');
     setSuccessMsg('');
 
+    if (!isSecureContext && window.location.hostname !== 'localhost') {
+      setErrorMsg('Biometrics on mobile require HTTPS. On local network HTTP, please use 4-Digit PIN.');
+      return;
+    }
+
     if (!window.PublicKeyCredential) {
-      setErrorMsg('Biometrics (Windows Hello / Fingerprint) not supported in this browser.');
+      setErrorMsg('Biometrics not supported in this browser.');
       setAuthMethod('pin');
+      return;
+    }
+
+    const savedCredIdBase64 = localStorage.getItem('kiosk_bio_credential_id');
+
+    // If no credential is saved on this phone yet, prompt registration directly!
+    if (!savedCredIdBase64) {
+      await handleRegisterBiometrics();
       return;
     }
 
@@ -78,30 +193,48 @@ export default function PinLock({ onUnlock }) {
       setIsSubmitting(true);
       const challenge = new Uint8Array(32);
       window.crypto.getRandomValues(challenge);
+      const rpId = getValidRpId();
+
+      const allowCredentials = [];
+      try {
+        const rawBuffer = base64ToBuffer(savedCredIdBase64);
+        allowCredentials.push({
+          id: rawBuffer,
+          type: 'public-key',
+          transports: ['internal']
+        });
+      } catch (e) {
+        console.warn('Could not decode saved credential ID:', e);
+      }
 
       const getOptions = {
         challenge,
-        rpId: window.location.hostname || 'localhost',
+        ...(rpId ? { rpId } : {}),
         timeout: 60000,
-        userVerification: 'preferred'
+        userVerification: 'preferred',
+        allowCredentials: allowCredentials.length > 0 ? allowCredentials : undefined
       };
 
       const assertion = await navigator.credentials.get({ publicKey: getOptions });
       if (assertion) {
-        setSuccessMsg('Biometric verification successful!');
+        setSuccessMsg('Fingerprint Verified! Unlocking...');
         setTimeout(() => {
           onUnlock();
         }, 300);
       }
     } catch (err) {
-      console.warn('Biometric auth error:', err);
+      console.warn('Biometric verify error:', err);
       const rawMsg = err?.message || '';
       if (err?.name === 'NotAllowedError' || rawMsg.includes('cancelled') || rawMsg.includes('canceled')) {
-        setErrorMsg('Biometric check cancelled. Please enter your 4-digit PIN.');
+        setErrorMsg('Fingerprint scan cancelled. Tap to try again or use PIN.');
+      } else if (err?.name === 'InvalidStateError' || rawMsg.includes('not found') || rawMsg.includes('no credentials')) {
+        // Credential was reset or from different origin
+        localStorage.removeItem('kiosk_bio_credential_id');
+        setBioRegistered(false);
+        setErrorMsg('Fingerprint needs re-registration on this device. Tap "Register Fingerprint".');
       } else {
-        setErrorMsg('Biometric scan failed. Switched to PIN keypad.');
+        setErrorMsg(rawMsg || 'Fingerprint scan failed. Tap to retry or use PIN.');
       }
-      setAuthMethod('pin');
     } finally {
       setIsSubmitting(false);
     }
@@ -124,12 +257,11 @@ export default function PinLock({ onUnlock }) {
     }
 
     if (!storedPwHash) {
-      // If no custom password was set, accept password "admin123" or prompt to use PIN
       if (password === 'admin123' || password === '123456') {
         onUnlock();
         return;
       }
-      setErrorMsg('No password configured. Please use PIN Keypad (Default: 1234).');
+      setErrorMsg('No custom password configured. Please use PIN Keypad (Default: 1234).');
       return;
     }
 
@@ -178,7 +310,6 @@ export default function PinLock({ onUnlock }) {
       }
     } catch (err) {
       console.error('PIN verification error:', err);
-      // Fallback plain check
       if (candidatePin === DEFAULT_PIN) {
         onUnlock();
       } else {
@@ -269,7 +400,7 @@ export default function PinLock({ onUnlock }) {
           </button>
           <button
             type="button"
-            onClick={() => { setAuthMethod('fingerprint'); setErrorMsg(''); handleVerifyBiometrics(); }}
+            onClick={() => { setAuthMethod('fingerprint'); setErrorMsg(''); }}
             className={`flex-1 h-9 rounded-xl text-[10px] font-black transition-all flex items-center justify-center gap-1.5 ${
               authMethod === 'fingerprint' ? 'bg-blue-600 text-white shadow-xs' : 'text-slate-600 hover:text-slate-900'
             }`}
@@ -344,30 +475,96 @@ export default function PinLock({ onUnlock }) {
           </div>
         )}
 
-        {/* 2. BIOMETRIC FINGERPRINT MODE */}
+        {/* 2. BIOMETRIC FINGERPRINT MODE (MOBILE & DESKTOP COMPLIANT) */}
         {authMethod === 'fingerprint' && (
-          <div className="w-full flex flex-col items-center gap-4 py-6 px-4 bg-white border border-slate-200 rounded-3xl shadow-xs text-center">
-            <button
-              type="button"
-              disabled={isSubmitting}
-              onClick={handleVerifyBiometrics}
-              className="w-24 h-24 rounded-full bg-blue-50 border-2 border-blue-300 hover:border-blue-600 flex items-center justify-center hover:scale-105 active:scale-95 transition-all group shadow-md"
-            >
-              <Fingerprint className="w-12 h-12 text-blue-600 group-hover:scale-110 transition-all animate-pulse" />
-            </button>
-            <div className="flex flex-col gap-1">
-              <span className="text-xs font-bold text-slate-800">Touch Device Fingerprint Sensor</span>
-              <p className="text-[9px] text-slate-500 leading-relaxed px-2">
-                Authenticate using Windows Hello, FaceID, or TouchID biometric hardware.
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={() => { setAuthMethod('pin'); handleClear(); }}
-              className="text-xs text-blue-600 font-bold hover:underline mt-1"
-            >
-              Use 4-Digit PIN Instead
-            </button>
+          <div className="w-full flex flex-col items-center gap-3 py-5 px-4 bg-white border border-slate-200 rounded-3xl shadow-xs text-center">
+            
+            {!isSecureContext && window.location.hostname !== 'localhost' ? (
+              <div className="p-3 bg-amber-50 border border-amber-200 rounded-2xl flex flex-col gap-1 text-[10px] text-amber-900 text-left">
+                <span className="font-bold flex items-center gap-1 text-amber-800">
+                  <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                  Mobile Browser HTTPS Requirement
+                </span>
+                <p className="text-[9px] text-amber-800/90 leading-normal">
+                  Mobile browsers (Chrome / Safari) require an <b>HTTPS connection</b> to access hardware fingerprint sensors.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setAuthMethod('pin')}
+                  className="mt-1 py-1.5 px-3 bg-amber-600 text-white rounded-xl font-bold text-center active:scale-95 text-[9.5px]"
+                >
+                  👉 Unlock Instantly with 4-Digit PIN (1234)
+                </button>
+              </div>
+            ) : bioRegistered ? (
+              /* Already Registered: Direct Sensor Tap */
+              <div className="flex flex-col items-center gap-3">
+                <button
+                  type="button"
+                  disabled={isSubmitting}
+                  onClick={handleVerifyBiometrics}
+                  className="w-24 h-24 rounded-full bg-blue-50 border-2 border-blue-400 hover:border-blue-600 flex items-center justify-center hover:scale-105 active:scale-95 transition-all group shadow-md"
+                >
+                  <Fingerprint className={`w-12 h-12 text-blue-600 group-hover:scale-110 transition-all ${isSubmitting ? 'animate-spin' : 'animate-pulse'}`} />
+                </button>
+                <div className="flex flex-col gap-0.5">
+                  <span className="text-xs font-black text-slate-800">Touch Fingerprint Sensor</span>
+                  <p className="text-[9px] text-slate-500 leading-normal px-2">
+                    Verify using your mobile fingerprint or Face ID.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2 mt-1">
+                  <button
+                    type="button"
+                    onClick={handleRegisterBiometrics}
+                    className="text-[9.5px] text-slate-500 hover:text-slate-800 font-semibold underline"
+                  >
+                    Re-link Fingerprint
+                  </button>
+                  <span className="text-slate-300">•</span>
+                  <button
+                    type="button"
+                    onClick={() => { setAuthMethod('pin'); handleClear(); }}
+                    className="text-[9.5px] text-blue-600 font-bold hover:underline"
+                  >
+                    Use PIN (1234)
+                  </button>
+                </div>
+              </div>
+            ) : (
+              /* First-Time Mobile Registration */
+              <div className="flex flex-col items-center gap-3">
+                <button
+                  type="button"
+                  disabled={isSubmitting}
+                  onClick={handleRegisterBiometrics}
+                  className="w-24 h-24 rounded-full bg-emerald-50 border-2 border-emerald-400 hover:border-emerald-600 flex items-center justify-center hover:scale-105 active:scale-95 transition-all group shadow-md"
+                >
+                  <Smartphone className="w-10 h-10 text-emerald-600 group-hover:scale-110 transition-all" />
+                </button>
+                <div className="flex flex-col gap-0.5">
+                  <span className="text-xs font-black text-slate-800">Register Fingerprint on This Phone</span>
+                  <p className="text-[9px] text-slate-500 leading-normal px-2">
+                    Tap below to connect your device's fingerprint or Face ID sensor for 1-touch unlock.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleRegisterBiometrics}
+                  disabled={isSubmitting}
+                  className="py-2 px-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-all shadow-xs active:scale-95 flex items-center gap-1.5"
+                >
+                  <Fingerprint className="w-4 h-4" /> Link Phone Biometrics
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setAuthMethod('pin'); handleClear(); }}
+                  className="text-[9.5px] text-blue-600 font-bold hover:underline mt-1"
+                >
+                  Use 4-Digit PIN Instead
+                </button>
+              </div>
+            )}
           </div>
         )}
 
