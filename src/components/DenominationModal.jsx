@@ -170,6 +170,7 @@ export default function DenominationModal({
                     pattern="[0-9]*"
                     value={count === 0 ? '' : count}
                     placeholder="0"
+                    onFocus={(e) => e.target.select()}
                     onChange={(e) => handleChange(note.key, e.target.value)}
                     className="w-16 h-8 px-1 text-center text-sm font-black bg-white border border-slate-300 text-blue-900 rounded-lg focus:border-blue-600 focus:outline-none shadow-xs"
                   />
@@ -229,6 +230,7 @@ export default function DenominationModal({
                     pattern="[0-9]*"
                     value={count === 0 ? '' : count}
                     placeholder="0"
+                    onFocus={(e) => e.target.select()}
                     onChange={(e) => handleChange(coin.key, e.target.value)}
                     className="w-16 h-7 px-1 text-center text-xs font-black bg-white border border-slate-300 text-amber-800 rounded focus:border-blue-600 focus:outline-none shadow-xs"
                   />

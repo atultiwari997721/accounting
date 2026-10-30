@@ -34,29 +34,42 @@ export default function SimpleModeCalculator({
   const formatINR = (val) => '₹' + Number(val || 0).toLocaleString('en-IN');
   const todayStr = new Date().toLocaleDateString('en-CA');
 
+  // Helper to sanitize numeric inputs and remove unwanted leading zeros while typing
+  const cleanNumber = (val) => {
+    if (val === undefined || val === null) return '';
+    const digits = String(val).replace(/[^0-9]/g, '');
+    if (!digits) return '';
+    // Strip leading zeros if followed by other digits (e.g. "05" -> "5", "00" -> "0")
+    return digits.replace(/^0+(?=\d)/, '');
+  };
+
   // 1. Core State
   const [date, setDate] = useState(todayStr);
 
-  // Opening amounts
+  // Opening amounts (empty string shows placeholder '0' and allows clean typing)
   const [openingCash, setOpeningCash] = useState(() => {
-    return activeDay?.openingCash !== undefined ? String(activeDay.openingCash) : '0';
+    const val = activeDay?.openingCash;
+    return val ? String(val) : '';
   });
   const [openingBankBalances, setOpeningBankBalances] = useState(() => {
     const map = {};
     accounts.forEach(acc => {
-      map[acc.bankName] = String(acc.currentBalance || 0);
+      const bal = Number(acc.currentBalance || 0);
+      map[acc.bankName] = bal > 0 ? String(bal) : '';
     });
     return map;
   });
 
   // Closing / Current amounts
   const [closingCash, setClosingCash] = useState(() => {
-    return activeDay?.closingCash !== undefined ? String(activeDay.closingCash) : '0';
+    const val = activeDay?.closingCash;
+    return val ? String(val) : '';
   });
   const [closingBankBalances, setClosingBankBalances] = useState(() => {
     const map = {};
     accounts.forEach(acc => {
-      map[acc.bankName] = String(acc.currentBalance || 0);
+      const bal = Number(acc.currentBalance || 0);
+      map[acc.bankName] = bal > 0 ? String(bal) : '';
     });
     return map;
   });
@@ -75,8 +88,8 @@ export default function SimpleModeCalculator({
   });
 
   // Custom Extra Income or Expense (optional adjustments)
-  const [extraExpenses, setExtraExpenses] = useState('0');
-  const [extraIncome, setExtraIncome] = useState('0');
+  const [extraExpenses, setExtraExpenses] = useState('');
+  const [extraIncome, setExtraIncome] = useState('');
 
   // New Udhar entry form
   const [newCustName, setNewCustName] = useState('');
@@ -110,7 +123,8 @@ export default function SimpleModeCalculator({
         const next = { ...prev };
         accounts.forEach(acc => {
           if (next[acc.bankName] === undefined) {
-            next[acc.bankName] = String(acc.currentBalance || 0);
+            const bal = Number(acc.currentBalance || 0);
+            next[acc.bankName] = bal > 0 ? String(bal) : '';
           }
         });
         return next;
@@ -119,7 +133,8 @@ export default function SimpleModeCalculator({
         const next = { ...prev };
         accounts.forEach(acc => {
           if (next[acc.bankName] === undefined) {
-            next[acc.bankName] = String(acc.currentBalance || 0);
+            const bal = Number(acc.currentBalance || 0);
+            next[acc.bankName] = bal > 0 ? String(bal) : '';
           }
         });
         return next;
@@ -444,7 +459,8 @@ export default function SimpleModeCalculator({
                   inputMode="numeric"
                   placeholder="0"
                   value={openingCash}
-                  onChange={(e) => setOpeningCash(e.target.value.replace(/[^0-9]/g, ''))}
+                  onFocus={(e) => e.target.select()}
+                  onChange={(e) => setOpeningCash(cleanNumber(e.target.value))}
                   className="h-11 px-3 bg-slate-50 border border-slate-200 focus:border-emerald-600 rounded-xl text-base font-black text-slate-900 focus:outline-none shadow-2xs"
                 />
                 <span className="text-[8px] text-slate-400">Cash in morning / start</span>
@@ -457,7 +473,8 @@ export default function SimpleModeCalculator({
                   inputMode="numeric"
                   placeholder="0"
                   value={closingCash}
-                  onChange={(e) => setClosingCash(e.target.value.replace(/[^0-9]/g, ''))}
+                  onFocus={(e) => e.target.select()}
+                  onChange={(e) => setClosingCash(cleanNumber(e.target.value))}
                   className="h-11 px-3 bg-emerald-50/50 border border-emerald-300 focus:border-emerald-600 rounded-xl text-base font-black text-emerald-950 focus:outline-none shadow-2xs"
                 />
                 <span className="text-[8px] text-slate-400">Cash counted right now</span>
@@ -481,8 +498,8 @@ export default function SimpleModeCalculator({
             {/* List of Accounts */}
             <div className="flex flex-col gap-2">
               {Object.keys(closingBankBalances).map(bName => {
-                const openVal = openingBankBalances[bName] || '0';
-                const closeVal = closingBankBalances[bName] || '0';
+                const openVal = openingBankBalances[bName] !== undefined ? openingBankBalances[bName] : '';
+                const closeVal = closingBankBalances[bName] !== undefined ? closingBankBalances[bName] : '';
                 const diff = (Number(closeVal) || 0) - (Number(openVal) || 0);
 
                 return (
@@ -502,9 +519,11 @@ export default function SimpleModeCalculator({
                         <input
                           type="text"
                           inputMode="numeric"
+                          placeholder="0"
                           value={openVal}
+                          onFocus={(e) => e.target.select()}
                           onChange={(e) => {
-                            const val = e.target.value.replace(/[^0-9]/g, '');
+                            const val = cleanNumber(e.target.value);
                             setOpeningBankBalances(prev => ({ ...prev, [bName]: val }));
                           }}
                           className="h-9 px-2 bg-white border border-slate-200 rounded-lg text-xs font-bold text-slate-800 focus:outline-none focus:border-blue-600"
@@ -516,9 +535,11 @@ export default function SimpleModeCalculator({
                         <input
                           type="text"
                           inputMode="numeric"
+                          placeholder="0"
                           value={closeVal}
+                          onFocus={(e) => e.target.select()}
                           onChange={(e) => {
-                            const val = e.target.value.replace(/[^0-9]/g, '');
+                            const val = cleanNumber(e.target.value);
                             setClosingBankBalances(prev => ({ ...prev, [bName]: val }));
                           }}
                           className="h-9 px-2 bg-white border border-blue-300 rounded-lg text-xs font-bold text-blue-900 focus:outline-none focus:border-blue-600"
@@ -544,7 +565,8 @@ export default function SimpleModeCalculator({
                 inputMode="numeric"
                 placeholder="Bal ₹"
                 value={newBankOpenBal}
-                onChange={(e) => setNewBankOpenBal(e.target.value.replace(/[^0-9]/g, ''))}
+                onFocus={(e) => e.target.select()}
+                onChange={(e) => setNewBankOpenBal(cleanNumber(e.target.value))}
                 className="w-20 h-9 px-2 bg-white border border-slate-200 rounded-xl text-xs font-medium focus:outline-none focus:border-blue-600"
               />
               <button
@@ -599,7 +621,8 @@ export default function SimpleModeCalculator({
                   inputMode="numeric"
                   placeholder="0"
                   value={extraExpenses}
-                  onChange={(e) => setExtraExpenses(e.target.value.replace(/[^0-9]/g, ''))}
+                  onFocus={(e) => e.target.select()}
+                  onChange={(e) => setExtraExpenses(cleanNumber(e.target.value))}
                   className="h-9 px-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-rose-700 focus:outline-none"
                 />
               </div>
@@ -610,7 +633,8 @@ export default function SimpleModeCalculator({
                   inputMode="numeric"
                   placeholder="0"
                   value={extraIncome}
-                  onChange={(e) => setExtraIncome(e.target.value.replace(/[^0-9]/g, ''))}
+                  onFocus={(e) => e.target.select()}
+                  onChange={(e) => setExtraIncome(cleanNumber(e.target.value))}
                   className="h-9 px-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-emerald-700 focus:outline-none"
                 />
               </div>
@@ -703,7 +727,8 @@ export default function SimpleModeCalculator({
                   required
                   placeholder="Amount ₹"
                   value={newCustAmount}
-                  onChange={(e) => setNewCustAmount(e.target.value.replace(/[^0-9]/g, ''))}
+                  onFocus={(e) => e.target.select()}
+                  onChange={(e) => setNewCustAmount(cleanNumber(e.target.value))}
                   className="h-10 px-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-black text-slate-900 focus:outline-none focus:border-purple-600"
                 />
               </div>

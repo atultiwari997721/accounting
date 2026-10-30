@@ -471,8 +471,9 @@ export default function TransactionForm({ activeDay, accounts, onSubmitTransacti
                 pattern="[0-9]*"
                 placeholder="Enter Amount"
                 value={amount}
+                onFocus={(e) => e.target.select()}
                 onChange={(e) => {
-                  const val = e.target.value.replace(/[^0-9]/g, '');
+                  const val = e.target.value.replace(/[^0-9]/g, '').replace(/^0+(?=\d)/, '');
                   setAmount(val);
                   setErrorMsg('');
                   setSuccessMsg('');
