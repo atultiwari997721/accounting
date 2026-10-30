@@ -1,14 +1,16 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Home, PlusCircle, ClipboardList, Settings as SettingsIcon, ShieldCheck } from 'lucide-react';
+import { Home, PlusCircle, ClipboardList, Settings as SettingsIcon, ShieldCheck, Calculator, Zap } from 'lucide-react';
 import PinLock from './components/PinLock';
 import Dashboard from './components/Dashboard';
 import TransactionForm from './components/TransactionForm';
 import PassbookAccounts from './components/PassbookAccounts';
 import Settings from './components/Settings';
+import SimpleModeCalculator from './components/SimpleModeCalculator';
 
 export default function App() {
   const [isLocked, setIsLocked] = useState(true);
   const [activeTab, setActiveTab] = useState('home'); // 'home' | 'add' | 'passbook' | 'settings'
+  const [appMode, setAppMode] = useState(() => localStorage.getItem('kiosk_app_mode') || 'detailed'); // 'detailed' | 'simple'
   const [activeDay, setActiveDay] = useState(null);
   const [accounts, setAccounts] = useState([]);
   const [transactions, setTransactions] = useState([]);
@@ -416,6 +418,38 @@ export default function App() {
     setIsLocked(true);
   };
 
+  const handleToggleAppMode = (mode) => {
+    setAppMode(mode);
+    localStorage.setItem('kiosk_app_mode', mode);
+    setActiveTab('home');
+    triggerNotification('App Mode Changed', `Switched to ${mode === 'simple' ? 'Simple Mode' : 'Detailed Mode'}`);
+  };
+
+  const handleSaveDayCalculation = (finalDayRecord) => {
+    const history = JSON.parse(localStorage.getItem('kiosk_day_history') || '[]');
+    const filtered = history.filter(h => h.date !== finalDayRecord.date);
+    filtered.unshift(finalDayRecord);
+    localStorage.setItem('kiosk_day_history', JSON.stringify(filtered));
+
+    if (finalDayRecord.closingBankBalances) {
+      const accs = JSON.parse(localStorage.getItem('kiosk_accounts') || '[]');
+      Object.entries(finalDayRecord.closingBankBalances).forEach(([bName, bal]) => {
+        const idx = accs.findIndex(a => a.bankName.toLowerCase() === bName.toLowerCase());
+        if (idx !== -1) {
+          accs[idx].currentBalance = Number(bal) || 0;
+        }
+      });
+      localStorage.setItem('kiosk_accounts', JSON.stringify(accs));
+    }
+
+    loadDataLocal();
+    triggerNotification('Day Ledger Saved', `Recorded Simple EOD profit of ₹${Number(finalDayRecord.totalProfit || 0).toLocaleString('en-IN')}`);
+  };
+
+  const handleUpdateAccountsFromSimple = (bankName, balance) => {
+    addAccountLocal({ bankName, currentBalance: balance });
+  };
+
   // Safe area helper class for mobile screens
   const baseWrapperClass = "w-full min-h-screen bg-slate-50 text-slate-900 flex flex-col antialiased select-none pb-[calc(4rem+env(safe-area-inset-bottom))] max-w-md mx-auto border-x border-slate-200 shadow-xl relative";
 
@@ -429,113 +463,212 @@ export default function App() {
       {/* Mobile Top App Header */}
       <header className="sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-slate-200 h-14 flex items-center justify-between px-4 shadow-xs">
         <div className="flex items-center gap-2">
-          <div className="w-3 h-3 rounded-full bg-blue-600 shadow-sm"></div>
+          <div className={`w-3 h-3 rounded-full ${appMode === 'simple' ? 'bg-emerald-500 shadow-emerald-200' : 'bg-blue-600 shadow-blue-200'} shadow-sm`}></div>
           <div>
             <h1 className="font-extrabold text-sm tracking-wide text-blue-900 uppercase">SBI Kiosk Ledger</h1>
-            <p className="text-[9px] text-slate-500 font-medium -mt-0.5">Cash & Account System</p>
+            <p className="text-[9px] text-slate-500 font-medium -mt-0.5">
+              {appMode === 'simple' ? '⚡ Simple Profit Mode' : 'Cash & Account System'}
+            </p>
           </div>
         </div>
         
-        {/* Connection Status Indicator */}
-        <div className="flex items-center gap-1 text-[10px] bg-blue-50 border border-blue-200 text-blue-700 font-semibold px-2.5 py-0.5 rounded-full shadow-xs">
-          <ShieldCheck className="w-3.5 h-3.5 text-blue-600" />
-          <span>Local Safe</span>
+        {/* Mode Switcher Pill */}
+        <div className="flex items-center gap-1.5">
+          <button
+            type="button"
+            onClick={() => handleToggleAppMode(appMode === 'simple' ? 'detailed' : 'simple')}
+            className={`flex items-center gap-1 text-[10px] font-black px-2.5 py-1 rounded-full border transition-all active:scale-95 shadow-2xs ${
+              appMode === 'simple'
+                ? 'bg-emerald-50 border-emerald-300 text-emerald-800 hover:bg-emerald-100'
+                : 'bg-blue-50 border-blue-200 text-blue-700 hover:bg-blue-100'
+            }`}
+            title="Click to switch between Simple Mode and Detailed Mode"
+          >
+            {appMode === 'simple' ? <Zap className="w-3 h-3 text-emerald-600" /> : <Calculator className="w-3 h-3 text-blue-600" />}
+            <span>{appMode === 'simple' ? 'Simple Mode' : 'Detailed Mode'}</span>
+          </button>
         </div>
       </header>
 
       {/* Main Screen Content */}
       <main className="flex-1 overflow-y-auto no-scrollbar pb-6">
-        {activeTab === 'home' && (
-          <Dashboard
-            activeDay={activeDay}
-            accounts={accounts}
-            transactions={transactions}
-            onNavigateToAddTx={() => setActiveTab('add')}
-            onAdjustCash={handleAdjustCash}
-          />
-        )}
-        {activeTab === 'add' && (
-          <TransactionForm
-            activeDay={activeDay}
-            accounts={accounts}
-            onSubmitTransaction={handleSubmitTransaction}
-            onNavigateToAccounts={() => setActiveTab('passbook')}
-            onOpenDay={handleOpenDay}
-          />
-        )}
-        {activeTab === 'passbook' && (
-          <PassbookAccounts
-            accounts={accounts}
-            transactions={transactions}
-            dayHistory={dayHistory}
-            activeDay={activeDay}
-            onAddAccount={handleAddAccount}
-            onBulkUpdateBalances={handleBulkUpdateBalances}
-            onUpdateCustomerName={handleUpdateCustomerName}
-            onSubmitTransaction={handleSubmitTransaction}
-            onAdjustCash={handleAdjustCash}
-            onCloseDay={handleCloseDay}
-            onOpenDay={handleOpenDay}
-            onReopenDay={handleReopenDay}
-          />
-        )}
-        {activeTab === 'settings' && (
-          <Settings
-            activeDay={activeDay}
-            dayHistory={dayHistory}
-            transactions={transactions}
-            accounts={accounts}
-            onOpenDay={handleOpenDay}
-            onCloseDay={handleCloseDay}
-            onReopenDay={handleReopenDay}
-            onReloadData={loadData}
-            onResetPin={handleResetPin}
-            onAdjustCash={handleAdjustCash}
-          />
+        {appMode === 'simple' ? (
+          <>
+            {(activeTab === 'home' || activeTab === 'add') && (
+              <SimpleModeCalculator
+                accounts={accounts}
+                dayHistory={dayHistory}
+                activeDay={activeDay}
+                onSaveDayCalculation={handleSaveDayCalculation}
+                onUpdateAccounts={handleUpdateAccountsFromSimple}
+              />
+            )}
+            {activeTab === 'passbook' && (
+              <PassbookAccounts
+                accounts={accounts}
+                transactions={transactions}
+                dayHistory={dayHistory}
+                activeDay={activeDay}
+                onAddAccount={handleAddAccount}
+                onBulkUpdateBalances={handleBulkUpdateBalances}
+                onUpdateCustomerName={handleUpdateCustomerName}
+                onSubmitTransaction={handleSubmitTransaction}
+                onAdjustCash={handleAdjustCash}
+                onCloseDay={handleCloseDay}
+                onOpenDay={handleOpenDay}
+                onReopenDay={handleReopenDay}
+              />
+            )}
+            {activeTab === 'settings' && (
+              <Settings
+                activeDay={activeDay}
+                dayHistory={dayHistory}
+                transactions={transactions}
+                accounts={accounts}
+                appMode={appMode}
+                onToggleAppMode={handleToggleAppMode}
+                onOpenDay={handleOpenDay}
+                onCloseDay={handleCloseDay}
+                onReopenDay={handleReopenDay}
+                onReloadData={loadData}
+                onResetPin={handleResetPin}
+                onAdjustCash={handleAdjustCash}
+              />
+            )}
+          </>
+        ) : (
+          <>
+            {activeTab === 'home' && (
+              <Dashboard
+                activeDay={activeDay}
+                accounts={accounts}
+                transactions={transactions}
+                onNavigateToAddTx={() => setActiveTab('add')}
+                onAdjustCash={handleAdjustCash}
+              />
+            )}
+            {activeTab === 'add' && (
+              <TransactionForm
+                activeDay={activeDay}
+                accounts={accounts}
+                onSubmitTransaction={handleSubmitTransaction}
+                onNavigateToAccounts={() => setActiveTab('passbook')}
+                onOpenDay={handleOpenDay}
+              />
+            )}
+            {activeTab === 'passbook' && (
+              <PassbookAccounts
+                accounts={accounts}
+                transactions={transactions}
+                dayHistory={dayHistory}
+                activeDay={activeDay}
+                onAddAccount={handleAddAccount}
+                onBulkUpdateBalances={handleBulkUpdateBalances}
+                onUpdateCustomerName={handleUpdateCustomerName}
+                onSubmitTransaction={handleSubmitTransaction}
+                onAdjustCash={handleAdjustCash}
+                onCloseDay={handleCloseDay}
+                onOpenDay={handleOpenDay}
+                onReopenDay={handleReopenDay}
+              />
+            )}
+            {activeTab === 'settings' && (
+              <Settings
+                activeDay={activeDay}
+                dayHistory={dayHistory}
+                transactions={transactions}
+                accounts={accounts}
+                appMode={appMode}
+                onToggleAppMode={handleToggleAppMode}
+                onOpenDay={handleOpenDay}
+                onCloseDay={handleCloseDay}
+                onReopenDay={handleReopenDay}
+                onReloadData={loadData}
+                onResetPin={handleResetPin}
+                onAdjustCash={handleAdjustCash}
+              />
+            )}
+          </>
         )}
       </main>
 
       {/* Bottom Navigation Bar */}
       <nav className="fixed bottom-0 left-0 right-0 h-16 bg-white border-t border-slate-200 max-w-md mx-auto z-40 flex items-center justify-around px-2 shadow-lg">
-        <button
-          onClick={() => setActiveTab('home')}
-          className={`flex flex-col items-center justify-center flex-1 h-full gap-1 transition-all ${
-            activeTab === 'home' ? 'text-blue-600 font-bold scale-105' : 'text-slate-400 hover:text-slate-600'
-          }`}
-        >
-          <Home className="w-5 h-5" />
-          <span className="text-[10px] tracking-wide">Home</span>
-        </button>
+        {appMode === 'simple' ? (
+          <>
+            <button
+              onClick={() => setActiveTab('home')}
+              className={`flex flex-col items-center justify-center flex-1 h-full gap-1 transition-all ${
+                activeTab === 'home' || activeTab === 'add' ? 'text-emerald-600 font-bold scale-105' : 'text-slate-400 hover:text-slate-600'
+              }`}
+            >
+              <Calculator className="w-5 h-5" />
+              <span className="text-[10px] tracking-wide">Calculator</span>
+            </button>
 
-        <button
-          onClick={() => setActiveTab('add')}
-          className={`flex flex-col items-center justify-center flex-1 h-full gap-1 transition-all ${
-            activeTab === 'add' ? 'text-blue-600 font-bold scale-105' : 'text-slate-400 hover:text-slate-600'
-          }`}
-        >
-          <PlusCircle className="w-5 h-5" />
-          <span className="text-[10px] tracking-wide">Withdraw</span>
-        </button>
+            <button
+              onClick={() => setActiveTab('passbook')}
+              className={`flex flex-col items-center justify-center flex-1 h-full gap-1 transition-all ${
+                activeTab === 'passbook' ? 'text-emerald-600 font-bold scale-105' : 'text-slate-400 hover:text-slate-600'
+              }`}
+            >
+              <ClipboardList className="w-5 h-5" />
+              <span className="text-[10px] tracking-wide">Passbook</span>
+            </button>
 
-        <button
-          onClick={() => setActiveTab('passbook')}
-          className={`flex flex-col items-center justify-center flex-1 h-full gap-1 transition-all ${
-            activeTab === 'passbook' ? 'text-blue-600 font-bold scale-105' : 'text-slate-400 hover:text-slate-600'
-          }`}
-        >
-          <ClipboardList className="w-5 h-5" />
-          <span className="text-[10px] tracking-wide">Passbook</span>
-        </button>
+            <button
+              onClick={() => setActiveTab('settings')}
+              className={`flex flex-col items-center justify-center flex-1 h-full gap-1 transition-all ${
+                activeTab === 'settings' ? 'text-emerald-600 font-bold scale-105' : 'text-slate-400 hover:text-slate-600'
+              }`}
+            >
+              <SettingsIcon className="w-5 h-5" />
+              <span className="text-[10px] tracking-wide">Settings</span>
+            </button>
+          </>
+        ) : (
+          <>
+            <button
+              onClick={() => setActiveTab('home')}
+              className={`flex flex-col items-center justify-center flex-1 h-full gap-1 transition-all ${
+                activeTab === 'home' ? 'text-blue-600 font-bold scale-105' : 'text-slate-400 hover:text-slate-600'
+              }`}
+            >
+              <Home className="w-5 h-5" />
+              <span className="text-[10px] tracking-wide">Home</span>
+            </button>
 
-        <button
-          onClick={() => setActiveTab('settings')}
-          className={`flex flex-col items-center justify-center flex-1 h-full gap-1 transition-all ${
-            activeTab === 'settings' ? 'text-blue-600 font-bold scale-105' : 'text-slate-400 hover:text-slate-600'
-          }`}
-        >
-          <SettingsIcon className="w-5 h-5" />
-          <span className="text-[10px] tracking-wide">Settings</span>
-        </button>
+            <button
+              onClick={() => setActiveTab('add')}
+              className={`flex flex-col items-center justify-center flex-1 h-full gap-1 transition-all ${
+                activeTab === 'add' ? 'text-blue-600 font-bold scale-105' : 'text-slate-400 hover:text-slate-600'
+              }`}
+            >
+              <PlusCircle className="w-5 h-5" />
+              <span className="text-[10px] tracking-wide">Withdraw</span>
+            </button>
+
+            <button
+              onClick={() => setActiveTab('passbook')}
+              className={`flex flex-col items-center justify-center flex-1 h-full gap-1 transition-all ${
+                activeTab === 'passbook' ? 'text-blue-600 font-bold scale-105' : 'text-slate-400 hover:text-slate-600'
+              }`}
+            >
+              <ClipboardList className="w-5 h-5" />
+              <span className="text-[10px] tracking-wide">Passbook</span>
+            </button>
+
+            <button
+              onClick={() => setActiveTab('settings')}
+              className={`flex flex-col items-center justify-center flex-1 h-full gap-1 transition-all ${
+                activeTab === 'settings' ? 'text-blue-600 font-bold scale-105' : 'text-slate-400 hover:text-slate-600'
+              }`}
+            >
+              <SettingsIcon className="w-5 h-5" />
+              <span className="text-[10px] tracking-wide">Settings</span>
+            </button>
+          </>
+        )}
       </nav>
     </div>
   );

@@ -9,6 +9,8 @@ export default function Settings({
   dayHistory = [], 
   transactions = [], 
   accounts = [],
+  appMode = 'detailed',
+  onToggleAppMode,
   onOpenDay, 
   onCloseDay, 
   onReopenDay, 
@@ -582,6 +584,60 @@ _Sent from Kiosk Ledger PWA_`;
           <SettingsIcon className="w-5 h-5 text-blue-600" /> Settings & Backups
         </h2>
         <p className="text-xs text-slate-500">Manage daily ledger sessions, backups, and security settings</p>
+      </div>
+
+      {/* App Operating Mode Selector (Simple Mode vs Detailed Mode) */}
+      <div className="bg-gradient-to-br from-slate-900 via-blue-950 to-slate-900 text-white rounded-2xl p-4 shadow-md flex flex-col gap-3 text-left border border-slate-800">
+        <div className="flex justify-between items-center">
+          <div className="flex items-center gap-2">
+            <div className={`p-2 rounded-xl ${appMode === 'simple' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-blue-500/20 text-blue-400 border border-blue-500/30'}`}>
+              <Calculator className="w-4 h-4" />
+            </div>
+            <div>
+              <span className="text-[10px] uppercase font-bold tracking-wider text-slate-300">App Operating Mode</span>
+              <h3 className="text-sm font-black text-white">
+                {appMode === 'simple' ? '⚡ Simple Mode (1-Time Totals)' : '📑 Detailed Mode (Tx-by-Tx)'}
+              </h3>
+            </div>
+          </div>
+          <span className={`px-2.5 py-1 rounded-full text-[9px] font-black uppercase tracking-wider ${
+            appMode === 'simple' ? 'bg-emerald-500 text-slate-950 shadow-sm' : 'bg-blue-600 text-white'
+          }`}>
+            Active
+          </span>
+        </div>
+
+        <p className="text-[11px] text-slate-300 leading-relaxed">
+          {appMode === 'simple' 
+            ? 'Simple Mode: Enter morning & evening Cash and Bank balances once. Profit is auto-calculated from the difference, with quick customer Udhar & Jama.'
+            : 'Detailed Mode: Record every withdrawal & deposit individually with real-time drawer denominations, commission calculations, and customer slips.'}
+        </p>
+
+        {/* Mode Toggle Buttons */}
+        <div className="grid grid-cols-2 gap-2 bg-white/10 p-1 rounded-xl">
+          <button
+            type="button"
+            onClick={() => onToggleAppMode && onToggleAppMode('simple')}
+            className={`py-2 px-3 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
+              appMode === 'simple'
+                ? 'bg-emerald-500 text-slate-950 shadow-md font-black'
+                : 'text-slate-300 hover:text-white'
+            }`}
+          >
+            <span>⚡ Simple Mode</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => onToggleAppMode && onToggleAppMode('detailed')}
+            className={`py-2 px-3 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
+              appMode === 'detailed'
+                ? 'bg-blue-600 text-white shadow-md font-black'
+                : 'text-slate-300 hover:text-white'
+            }`}
+          >
+            <span>📑 Detailed Mode</span>
+          </button>
+        </div>
       </div>
 
       {/* Daily Ledger Controls */}
