@@ -29,6 +29,8 @@ export default function SimpleModeCalculator({
   dayHistory = [],
   activeDay = null,
   onSaveDayCalculation,
+  onAddAccount,
+  onDeleteAccount,
   onUpdateAccounts
 }) {
   const formatINR = (val) => '₹' + Number(val || 0).toLocaleString('en-IN');
@@ -243,7 +245,9 @@ export default function SimpleModeCalculator({
     setOpeningBankBalances(prev => ({ ...prev, [bName]: bal }));
     setClosingBankBalances(prev => ({ ...prev, [bName]: bal }));
 
-    if (onUpdateAccounts) {
+    if (onAddAccount) {
+      onAddAccount({ bankName: bName, currentBalance: Number(bal) });
+    } else if (onUpdateAccounts) {
       onUpdateAccounts(bName, Number(bal));
     }
 
@@ -508,9 +512,36 @@ export default function SimpleModeCalculator({
                       <span className="text-xs font-bold text-slate-800 flex items-center gap-1">
                         <Landmark className="w-3 h-3 text-blue-600" /> {bName}
                       </span>
-                      <span className={`text-[9.5px] font-black ${diff >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
-                        {diff >= 0 ? '+' : ''}{formatINR(diff)}
-                      </span>
+                      <div className="flex items-center gap-2">
+                        <span className={`text-[9.5px] font-black ${diff >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
+                          {diff >= 0 ? '+' : ''}{formatINR(diff)}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (window.confirm(`Delete bank account "${bName}"?`)) {
+                              const accObj = accounts.find(a => a.bankName.toLowerCase() === bName.toLowerCase());
+                              if (accObj && onDeleteAccount) {
+                                onDeleteAccount(accObj._id);
+                              }
+                              setOpeningBankBalances(prev => {
+                                const next = { ...prev };
+                                delete next[bName];
+                                return next;
+                              });
+                              setClosingBankBalances(prev => {
+                                const next = { ...prev };
+                                delete next[bName];
+                                return next;
+                              });
+                            }
+                          }}
+                          className="text-slate-300 hover:text-rose-600 p-0.5 rounded transition-all"
+                          title={`Delete account ${bName}`}
+                        >
+                          <Trash2 className="w-3 h-3" />
+                        </button>
+                      </div>
                     </div>
 
                     <div className="grid grid-cols-2 gap-2 text-[10px]">

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Settings as SettingsIcon, Play, Square, Download, Upload, ShieldAlert, RefreshCw, AlertCircle, Sparkles, RefreshCcw, Fingerprint, Calculator, FileText, Share2, Clock } from 'lucide-react';
+import { Settings as SettingsIcon, Play, Square, Download, Upload, ShieldAlert, ShieldCheck, Lock, Unlock, RefreshCw, AlertCircle, Sparkles, RefreshCcw, Fingerprint, Calculator, FileText, Share2, Clock } from 'lucide-react';
 import DenominationModal from './DenominationModal';
 import CashStatementReceipt from './CashStatementReceipt';
 import DetailedStatementReportModal from './DetailedStatementReportModal';
@@ -11,6 +11,8 @@ export default function Settings({
   accounts = [],
   appMode = 'detailed',
   onToggleAppMode,
+  loginSecurityEnabled = false,
+  onToggleLoginSecurity,
   onOpenDay, 
   onCloseDay, 
   onReopenDay, 
@@ -937,6 +939,43 @@ _Sent from Kiosk Ledger PWA_`;
             className="hidden"
           />
         </label>
+      </div>
+
+      {/* App Login Security Criteria Control Panel */}
+      <div className="bg-white border border-slate-200 rounded-2xl p-4 flex flex-col gap-3 shadow-sm text-left">
+        <div className="flex justify-between items-center">
+          <h3 className="text-xs font-bold uppercase tracking-wider text-slate-600 flex items-center gap-1.5">
+            <Lock className="w-3.5 h-3.5 text-blue-600" /> App Login Security Criteria
+          </h3>
+          <span className={`px-2 py-0.5 rounded text-[8px] font-bold uppercase tracking-wider ${
+            loginSecurityEnabled ? 'bg-emerald-50 border border-emerald-200 text-emerald-700' : 'bg-amber-50 border border-amber-200 text-amber-700'
+          }`}>
+            {loginSecurityEnabled ? 'ACTIVE (PIN / Bio Required)' : 'DISABLED (Direct Open)'}
+          </span>
+        </div>
+
+        <p className="text-[11px] text-slate-500 leading-relaxed">
+          {loginSecurityEnabled
+            ? 'Login criteria is currently ENABLED. The app prompts for PIN or Biometrics on launch and after 5 minutes of inactivity.'
+            : 'Login criteria is currently DISABLED. The app opens directly into Simple Calculation Mode without requiring PIN or biometric verification.'}
+        </p>
+
+        <button
+          onClick={() => {
+            if (onToggleLoginSecurity) {
+              onToggleLoginSecurity(!loginSecurityEnabled);
+              setActionSuccess(!loginSecurityEnabled ? 'Login criteria enabled.' : 'Login criteria disabled. App will open directly.');
+            }
+          }}
+          className={`w-full h-10 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all active:scale-[0.98] ${
+            loginSecurityEnabled
+              ? 'bg-amber-50 border border-amber-300 text-amber-800 hover:bg-amber-100'
+              : 'bg-blue-600 hover:bg-blue-700 text-white shadow-xs'
+          }`}
+        >
+          {loginSecurityEnabled ? <Unlock className="w-4 h-4" /> : <Lock className="w-4 h-4" />}
+          {loginSecurityEnabled ? 'Disable Login Criteria (Direct Access)' : 'Enable Login Criteria (PIN Required)'}
+        </button>
       </div>
 
       {/* Biometric Security Control Panel */}

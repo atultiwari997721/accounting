@@ -8,13 +8,15 @@ import Settings from './components/Settings';
 import SimpleModeCalculator from './components/SimpleModeCalculator';
 
 export default function App() {
-  const [isLocked, setIsLocked] = useState(true);
+  const [loginSecurityEnabled, setLoginSecurityEnabled] = useState(() => localStorage.getItem('kiosk_login_security_enabled') === 'true');
+  const [isLocked, setIsLocked] = useState(false);
   const [activeTab, setActiveTab] = useState('home'); // 'home' | 'add' | 'passbook' | 'settings'
-  const [appMode, setAppMode] = useState(() => localStorage.getItem('kiosk_app_mode') || 'detailed'); // 'detailed' | 'simple'
+  const [appMode, setAppMode] = useState(() => localStorage.getItem('kiosk_app_mode') || 'simple'); // 'simple' by default | 'detailed'
   const [activeDay, setActiveDay] = useState(null);
   const [accounts, setAccounts] = useState([]);
   const [transactions, setTransactions] = useState([]);
   const [dayHistory, setDayHistory] = useState([]);
+  const [accountHistory, setAccountHistory] = useState([]);
 
   const triggerNotification = (title, body) => {
     if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
@@ -28,13 +30,14 @@ export default function App() {
 
   const idleTimerRef = useRef(null);
 
-  // 1. Idle Lock Timer (5 minutes)
+  // 1. Idle Lock Timer (5 minutes - active only when loginSecurityEnabled is true)
   const resetIdleTimer = () => {
+    if (!loginSecurityEnabled) return;
     if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
     
     idleTimerRef.current = setTimeout(() => {
       const pinSet = localStorage.getItem('kiosk_pin_hash');
-      if (pinSet) {
+      if (pinSet && loginSecurityEnabled) {
         setIsLocked(true);
         console.log('App auto-locked due to 5 minutes of inactivity.');
       }
@@ -42,11 +45,14 @@ export default function App() {
   };
 
   useEffect(() => {
-    // Check if PIN has been set
-    const pinSet = localStorage.getItem('kiosk_pin_hash');
-    if (!pinSet) {
-      // Force Lock modal into SETUP mode
-      setIsLocked(true);
+    // Only enforce lock if login security criteria is enabled
+    if (loginSecurityEnabled) {
+      const pinSet = localStorage.getItem('kiosk_pin_hash');
+      if (!pinSet) {
+        setIsLocked(true);
+      }
+    } else {
+      setIsLocked(false);
     }
 
     // Event listeners to monitor user interaction
@@ -63,18 +69,37 @@ export default function App() {
         window.removeEventListener(event, resetIdleTimer);
       });
     };
-  }, []);
+  }, [loginSecurityEnabled]);
 
   // 2. Local Storage Sync Fallback Logic
+  const logAccountChange = (entry) => {
+    try {
+      const list = JSON.parse(localStorage.getItem('kiosk_account_history') || '[]');
+      const record = {
+        id: 'ach_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
+        timestamp: new Date().toISOString(),
+        ...entry
+      };
+      list.unshift(record);
+      const trimmed = list.slice(0, 500);
+      localStorage.setItem('kiosk_account_history', JSON.stringify(trimmed));
+      setAccountHistory(trimmed);
+    } catch (e) {
+      console.warn('Failed to log account change:', e);
+    }
+  };
+
   const loadDataLocal = () => {
     const day = JSON.parse(localStorage.getItem('kiosk_active_day') || 'null');
     const accs = JSON.parse(localStorage.getItem('kiosk_accounts') || '[]');
     const txs = JSON.parse(localStorage.getItem('kiosk_transactions') || '[]');
     const history = JSON.parse(localStorage.getItem('kiosk_day_history') || '[]');
+    const accHist = JSON.parse(localStorage.getItem('kiosk_account_history') || '[]');
     setActiveDay(day);
     setAccounts(accs);
     setTransactions(txs);
     setDayHistory(history);
+    setAccountHistory(accHist);
   };
 
   const loadData = () => {
@@ -89,17 +114,91 @@ export default function App() {
 
   const addAccountLocal = (bankData) => {
     const accs = JSON.parse(localStorage.getItem('kiosk_accounts') || '[]');
-    const exists = accs.find(a => a.bankName.toLowerCase() === bankData.bankName.toLowerCase());
+    const bName = (bankData.bankName || '').trim();
+    if (!bName) return { success: false, error: 'Bank name is required' };
+
+    const exists = accs.find(a => a.bankName.toLowerCase() === bName.toLowerCase());
     if (exists) return { success: false, error: 'Bank account already exists locally' };
 
+    const initBal = Number(bankData.currentBalance) || 0;
     const newAcc = {
       _id: 'local_' + Math.random().toString(36).substr(2, 9),
-      bankName: bankData.bankName,
-      currentBalance: bankData.currentBalance || 0,
+      bankName: bName,
+      currentBalance: initBal,
       createdAt: new Date().toISOString()
     };
     accs.push(newAcc);
     localStorage.setItem('kiosk_accounts', JSON.stringify(accs));
+
+    logAccountChange({
+      type: 'ACCOUNT_CREATED',
+      bankName: bName,
+      oldBalance: 0,
+      newBalance: initBal,
+      note: `Registered account "${bName}" with balance ₹${initBal.toLocaleString('en-IN')}`
+    });
+
+    loadDataLocal();
+    return { success: true };
+  };
+
+  const editAccountLocal = (accountId, updatedData) => {
+    const accs = JSON.parse(localStorage.getItem('kiosk_accounts') || '[]');
+    const idx = accs.findIndex(a => a._id === accountId);
+    if (idx === -1) return { success: false, error: 'Bank account not found' };
+
+    const oldAcc = accs[idx];
+    const oldName = oldAcc.bankName;
+    const oldBalance = Number(oldAcc.currentBalance) || 0;
+
+    const newName = (updatedData.bankName || '').trim() || oldName;
+    const newBalance = updatedData.currentBalance !== undefined ? Number(updatedData.currentBalance) : oldBalance;
+
+    if (newName.toLowerCase() !== oldName.toLowerCase()) {
+      const duplicate = accs.find(a => a._id !== accountId && a.bankName.toLowerCase() === newName.toLowerCase());
+      if (duplicate) return { success: false, error: `Account "${newName}" already exists.` };
+    }
+
+    accs[idx].bankName = newName;
+    accs[idx].currentBalance = newBalance;
+    accs[idx].updatedAt = new Date().toISOString();
+
+    localStorage.setItem('kiosk_accounts', JSON.stringify(accs));
+
+    logAccountChange({
+      type: 'ACCOUNT_EDITED',
+      bankName: newName,
+      oldName: oldName !== newName ? oldName : undefined,
+      oldBalance,
+      newBalance,
+      note: oldName !== newName 
+        ? `Renamed from "${oldName}" to "${newName}", balance set to ₹${newBalance.toLocaleString('en-IN')}`
+        : `Updated balance of "${newName}" from ₹${oldBalance.toLocaleString('en-IN')} to ₹${newBalance.toLocaleString('en-IN')}`
+    });
+
+    loadDataLocal();
+    return { success: true };
+  };
+
+  const deleteAccountLocal = (accountId) => {
+    const accs = JSON.parse(localStorage.getItem('kiosk_accounts') || '[]');
+    const target = accs.find(a => a._id === accountId);
+    if (!target) return { success: false, error: 'Account not found' };
+
+    const targetName = target.bankName;
+    const targetBal = Number(target.currentBalance) || 0;
+
+    const filtered = accs.filter(a => a._id !== accountId);
+    localStorage.setItem('kiosk_accounts', JSON.stringify(filtered));
+
+    logAccountChange({
+      type: 'ACCOUNT_DELETED',
+      bankName: targetName,
+      oldBalance: targetBal,
+      newBalance: 0,
+      note: `Deleted account "${targetName}" (had remaining balance ₹${targetBal.toLocaleString('en-IN')})`
+    });
+
     loadDataLocal();
     return { success: true };
   };
@@ -128,6 +227,7 @@ export default function App() {
       }
     }
 
+    const bankBalBefore = accs[idx].currentBalance;
     accs[idx].currentBalance += txData.customerAmount;
     day.closingCash -= txData.cashOut;
     day.totalProfit += txData.profit;
@@ -166,6 +266,14 @@ export default function App() {
     localStorage.setItem('kiosk_active_day', JSON.stringify(day));
     localStorage.setItem('kiosk_transactions', JSON.stringify(txs));
 
+    logAccountChange({
+      type: targetType === 'Credit' ? 'TX_WITHDRAWAL' : 'TX_DEPOSIT',
+      bankName: accs[idx].bankName,
+      oldBalance: bankBalBefore,
+      newBalance: accs[idx].currentBalance,
+      note: `${targetType === 'Credit' ? 'Withdrawal' : 'Deposit'}: ₹${Math.abs(txData.customerAmount).toLocaleString('en-IN')}${txData.customerName ? ` (${txData.customerName})` : ''}`
+    });
+
     loadDataLocal();
     return { success: true };
   };
@@ -175,7 +283,18 @@ export default function App() {
     payload.forEach(item => {
       const idx = accs.findIndex(a => a._id === item.id);
       if (idx !== -1) {
-        accs[idx].currentBalance = item.currentBalance;
+        const oldBal = Number(accs[idx].currentBalance) || 0;
+        const newBal = Number(item.currentBalance) || 0;
+        if (oldBal !== newBal) {
+          accs[idx].currentBalance = newBal;
+          logAccountChange({
+            type: 'BALANCE_UPDATED',
+            bankName: accs[idx].bankName,
+            oldBalance: oldBal,
+            newBalance: newBal,
+            note: `Balance updated manually: ₹${oldBal.toLocaleString('en-IN')} ➔ ₹${newBal.toLocaleString('en-IN')}`
+          });
+        }
       }
     });
     localStorage.setItem('kiosk_accounts', JSON.stringify(accs));
@@ -415,7 +534,26 @@ export default function App() {
 
   const handleResetPin = () => {
     localStorage.removeItem('kiosk_pin_hash');
+    setLoginSecurityEnabled(true);
+    localStorage.setItem('kiosk_login_security_enabled', 'true');
     setIsLocked(true);
+  };
+
+  const handleToggleLoginSecurity = (enabled) => {
+    const nextVal = typeof enabled === 'boolean' ? enabled : !loginSecurityEnabled;
+    localStorage.setItem('kiosk_login_security_enabled', String(nextVal));
+    setLoginSecurityEnabled(nextVal);
+    if (!nextVal) {
+      setIsLocked(false);
+    }
+  };
+
+  const handleEditAccount = async (id, updatedData) => {
+    return editAccountLocal(id, updatedData);
+  };
+
+  const handleDeleteAccount = async (id) => {
+    return deleteAccountLocal(id);
   };
 
   const handleToggleAppMode = (mode) => {
@@ -435,8 +573,19 @@ export default function App() {
       const accs = JSON.parse(localStorage.getItem('kiosk_accounts') || '[]');
       Object.entries(finalDayRecord.closingBankBalances).forEach(([bName, bal]) => {
         const idx = accs.findIndex(a => a.bankName.toLowerCase() === bName.toLowerCase());
+        const newBal = Number(bal) || 0;
         if (idx !== -1) {
-          accs[idx].currentBalance = Number(bal) || 0;
+          const oldBal = Number(accs[idx].currentBalance) || 0;
+          if (oldBal !== newBal) {
+            accs[idx].currentBalance = newBal;
+            logAccountChange({
+              type: 'SIMPLE_EOD_SYNC',
+              bankName: accs[idx].bankName,
+              oldBalance: oldBal,
+              newBalance: newBal,
+              note: `Simple Mode EOD balance for ${finalDayRecord.date}: ₹${oldBal.toLocaleString('en-IN')} ➔ ₹${newBal.toLocaleString('en-IN')}`
+            });
+          }
         }
       });
       localStorage.setItem('kiosk_accounts', JSON.stringify(accs));
@@ -453,7 +602,7 @@ export default function App() {
   // Safe area helper class for mobile screens
   const baseWrapperClass = "w-full min-h-screen bg-slate-50 text-slate-900 flex flex-col antialiased select-none pb-[calc(4rem+env(safe-area-inset-bottom))] max-w-md mx-auto border-x border-slate-200 shadow-xl relative";
 
-  if (isLocked) {
+  if (loginSecurityEnabled && isLocked) {
     return <PinLock onUnlock={() => { setIsLocked(false); loadData(); }} />;
   }
 
@@ -500,6 +649,8 @@ export default function App() {
                 dayHistory={dayHistory}
                 activeDay={activeDay}
                 onSaveDayCalculation={handleSaveDayCalculation}
+                onAddAccount={handleAddAccount}
+                onDeleteAccount={handleDeleteAccount}
                 onUpdateAccounts={handleUpdateAccountsFromSimple}
               />
             )}
@@ -509,7 +660,10 @@ export default function App() {
                 transactions={transactions}
                 dayHistory={dayHistory}
                 activeDay={activeDay}
+                accountHistory={accountHistory}
                 onAddAccount={handleAddAccount}
+                onEditAccount={handleEditAccount}
+                onDeleteAccount={handleDeleteAccount}
                 onBulkUpdateBalances={handleBulkUpdateBalances}
                 onUpdateCustomerName={handleUpdateCustomerName}
                 onSubmitTransaction={handleSubmitTransaction}
@@ -527,6 +681,8 @@ export default function App() {
                 accounts={accounts}
                 appMode={appMode}
                 onToggleAppMode={handleToggleAppMode}
+                loginSecurityEnabled={loginSecurityEnabled}
+                onToggleLoginSecurity={handleToggleLoginSecurity}
                 onOpenDay={handleOpenDay}
                 onCloseDay={handleCloseDay}
                 onReopenDay={handleReopenDay}
@@ -562,7 +718,10 @@ export default function App() {
                 transactions={transactions}
                 dayHistory={dayHistory}
                 activeDay={activeDay}
+                accountHistory={accountHistory}
                 onAddAccount={handleAddAccount}
+                onEditAccount={handleEditAccount}
+                onDeleteAccount={handleDeleteAccount}
                 onBulkUpdateBalances={handleBulkUpdateBalances}
                 onUpdateCustomerName={handleUpdateCustomerName}
                 onSubmitTransaction={handleSubmitTransaction}
@@ -580,6 +739,8 @@ export default function App() {
                 accounts={accounts}
                 appMode={appMode}
                 onToggleAppMode={handleToggleAppMode}
+                loginSecurityEnabled={loginSecurityEnabled}
+                onToggleLoginSecurity={handleToggleLoginSecurity}
                 onOpenDay={handleOpenDay}
                 onCloseDay={handleCloseDay}
                 onReopenDay={handleReopenDay}
