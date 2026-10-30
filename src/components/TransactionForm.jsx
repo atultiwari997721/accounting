@@ -8,9 +8,48 @@ export default function TransactionForm({ activeDay, accounts, onSubmitTransacti
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
-  const [quickOpeningCash, setQuickOpeningCash] = useState('');
+  const [quickOpeningCash, setQuickOpeningCash] = useState(() => {
+    try {
+      const history = JSON.parse(localStorage.getItem('kiosk_day_history') || '[]');
+      const closed = history.filter(d => d.status === 'Closed' || d.closingCash !== undefined);
+      if (closed.length > 0) {
+        const cCash = closed[0].closingCash ?? closed[0].closing_cash ?? 0;
+        return cCash > 0 ? String(cCash) : '';
+      }
+    } catch (e) {}
+    return '';
+  });
   const [showDenomModal, setShowDenomModal] = useState(false);
-  const [quickDenoms, setQuickDenoms] = useState({ n500: 0, n200: 0, n100: 0, n50: 0, n20: 0, n10: 0, coins: 0 });
+  const [quickDenoms, setQuickDenoms] = useState(() => {
+    try {
+      const history = JSON.parse(localStorage.getItem('kiosk_day_history') || '[]');
+      const closed = history.filter(d => d.status === 'Closed' || d.closingCash !== undefined);
+      if (closed.length > 0 && closed[0].cashDenominations) {
+        return { ...closed[0].cashDenominations };
+      }
+    } catch (e) {}
+    return { n500: 0, n200: 0, n100: 0, n50: 0, n20: 0, n10: 0, coins: 0 };
+  });
+
+  // Sync default opening cash from last closed day when activeDay is not open
+  useEffect(() => {
+    if (!activeDay) {
+      try {
+        const history = JSON.parse(localStorage.getItem('kiosk_day_history') || '[]');
+        const closed = history.filter(d => d.status === 'Closed' || d.closingCash !== undefined);
+        if (closed.length > 0) {
+          const last = closed[0];
+          const cCash = last.closingCash ?? last.closing_cash ?? 0;
+          if (cCash > 0) {
+            setQuickOpeningCash(String(cCash));
+          }
+          if (last.cashDenominations) {
+            setQuickDenoms({ ...last.cashDenominations });
+          }
+        }
+      } catch (e) {}
+    }
+  }, [activeDay]);
 
   // Jama (Advance Deposit) Modal State
   const [showJamaModal, setShowJamaModal] = useState(false);
@@ -377,6 +416,15 @@ export default function TransactionForm({ activeDay, accounts, onSubmitTransacti
               <p className="text-[10px] text-red-600">Open the day ledger directly below to begin logging transactions.</p>
             </div>
           </div>
+
+          {quickOpeningCash && Number(quickOpeningCash) > 0 && (
+            <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-2 flex items-center gap-1.5 text-left">
+              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+              <span className="text-[9.5px] text-emerald-800 font-bold">
+                Default Opening Cash carried forward from previous closed ledger: {formatINR(quickOpeningCash)}
+              </span>
+            </div>
+          )}
           
           <div className="flex gap-2 items-center bg-white p-2 rounded-xl border border-red-200 shadow-2xs">
             <input

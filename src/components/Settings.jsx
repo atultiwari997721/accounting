@@ -1,5 +1,32 @@
-import React, { useState, useEffect } from 'react';
-import { Settings as SettingsIcon, Play, Square, Download, Upload, ShieldAlert, ShieldCheck, Lock, Unlock, RefreshCw, AlertCircle, Sparkles, RefreshCcw, Fingerprint, Calculator, FileText, Share2, Clock } from 'lucide-react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { 
+  Settings as SettingsIcon, 
+  Play, 
+  Square, 
+  Download, 
+  Upload, 
+  ShieldAlert, 
+  ShieldCheck, 
+  Lock, 
+  Unlock, 
+  RefreshCw, 
+  AlertCircle, 
+  Sparkles, 
+  RefreshCcw, 
+  Fingerprint, 
+  Calculator, 
+  FileText, 
+  Share2, 
+  Clock,
+  History,
+  Trash2,
+  Calendar,
+  Search,
+  Filter,
+  Activity,
+  CheckCircle2,
+  ArrowRight
+} from 'lucide-react';
 import DenominationModal from './DenominationModal';
 import CashStatementReceipt from './CashStatementReceipt';
 import DetailedStatementReportModal from './DetailedStatementReportModal';
@@ -13,6 +40,10 @@ export default function Settings({
   onToggleAppMode,
   loginSecurityEnabled = false,
   onToggleLoginSecurity,
+  systemActivityLog = [],
+  onClearActivityLog,
+  onClearAllData,
+  logSystemActivity,
   onOpenDay, 
   onCloseDay, 
   onReopenDay, 
@@ -51,6 +82,85 @@ export default function Settings({
     typeof window !== 'undefined' && 'Notification' in window ? Notification.permission : 'default'
   );
 
+  // Activity History State & Filtering
+  const [activityCategory, setActivityCategory] = useState('ALL');
+  const [activityDateFilter, setActivityDateFilter] = useState('');
+  const [activitySearch, setActivitySearch] = useState('');
+  const [showFullActivity, setShowFullActivity] = useState(false);
+
+  const getCategoryBadgeClass = (category) => {
+    switch (category) {
+      case 'SESSION':
+        return 'bg-blue-50 text-blue-700 border-blue-200';
+      case 'LEDGER':
+        return 'bg-amber-50 text-amber-800 border-amber-200';
+      case 'ACCOUNTS':
+        return 'bg-emerald-50 text-emerald-800 border-emerald-200';
+      case 'TRANSACTIONS':
+        return 'bg-purple-50 text-purple-800 border-purple-200';
+      case 'SECURITY':
+        return 'bg-indigo-50 text-indigo-800 border-indigo-200';
+      case 'DATA':
+        return 'bg-rose-50 text-rose-800 border-rose-200';
+      default:
+        return 'bg-slate-50 text-slate-700 border-slate-200';
+    }
+  };
+
+  const filteredActivities = useMemo(() => {
+    let list = Array.isArray(systemActivityLog) ? [...systemActivityLog] : [];
+
+    if (activityCategory !== 'ALL') {
+      list = list.filter(item => item.category === activityCategory);
+    }
+
+    if (activityDateFilter) {
+      list = list.filter(item => item.dateStr === activityDateFilter);
+    }
+
+    if (activitySearch.trim()) {
+      const q = activitySearch.toLowerCase();
+      list = list.filter(item => 
+        (item.action || '').toLowerCase().includes(q) ||
+        (item.details || '').toLowerCase().includes(q) ||
+        (item.category || '').toLowerCase().includes(q)
+      );
+    }
+
+    return list;
+  }, [systemActivityLog, activityCategory, activityDateFilter, activitySearch]);
+
+  const groupedActivities = useMemo(() => {
+    const groups = {};
+    filteredActivities.forEach(item => {
+      const d = item.dateStr || 'Recent';
+      if (!groups[d]) groups[d] = [];
+      groups[d].push(item);
+    });
+
+    return Object.entries(groups).map(([d, items]) => ({
+      date: d,
+      items
+    }));
+  }, [filteredActivities]);
+
+  const handleExportActivityLog = () => {
+    const list = Array.isArray(systemActivityLog) ? systemActivityLog : [];
+    const textContent = list.map(item => `[${item.dateStr} ${item.timeStr}] [${item.category}] ${item.action}: ${item.details}`).join('\n');
+    const blob = new Blob([textContent], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `kiosk_system_activity_${new Date().toISOString().split('T')[0]}.txt`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    if (logSystemActivity) {
+      logSystemActivity('Activity Log Exported', 'DATA', 'Exported chronological system action history');
+    }
+  };
+
   // 2. ALL EFFECT HOOKS
   useEffect(() => {
     const ownerId = localStorage.getItem('kiosk_owner_userid') || 'admin';
@@ -60,16 +170,39 @@ export default function Settings({
 
   useEffect(() => {
     const fetchLastClosingCash = () => {
-      const history = JSON.parse(localStorage.getItem('kiosk_day_history') || '[]');
+      const history = (dayHistory && dayHistory.length > 0)
+        ? dayHistory
+        : JSON.parse(localStorage.getItem('kiosk_day_history') || '[]');
       if (history.length > 0) {
-        const closed = history.filter(d => d.status === 'Closed');
+        const closed = history.filter(d => d.status === 'Closed' || d.closingCash !== undefined);
         if (closed.length > 0) {
-          setLastClosingCash(closed[0].closingCash || closed[0].closing_cash || 0);
+          const last = closed[0];
+          const cCash = last.closingCash ?? last.closing_cash ?? 0;
+          setLastClosingCash(cCash);
+          if (!activeDay) {
+            setOpeningCash(cCash > 0 ? String(cCash) : (cCash === 0 ? '0' : ''));
+            if (last.cashDenominations) {
+              setOpenDenoms({
+                n500: Number(last.cashDenominations.n500) || 0,
+                n200: Number(last.cashDenominations.n200) || 0,
+                n100: Number(last.cashDenominations.n100) || 0,
+                n50: Number(last.cashDenominations.n50) || 0,
+                n20: Number(last.cashDenominations.n20) || 0,
+                n10: Number(last.cashDenominations.n10) || 0,
+                coins: Number(last.cashDenominations.coins) || 0,
+                c20: Number(last.cashDenominations.c20) || 0,
+                c10: Number(last.cashDenominations.c10) || 0,
+                c5: Number(last.cashDenominations.c5) || 0,
+                c2: Number(last.cashDenominations.c2) || 0,
+                c1: Number(last.cashDenominations.c1) || 0
+              });
+            }
+          }
         }
       }
     };
     fetchLastClosingCash();
-  }, [activeDay]);
+  }, [activeDay, dayHistory]);
 
   // 3. ALL HANDLERS AND HELPERS
   const toggleBiometrics = async () => {
@@ -801,13 +934,25 @@ _Sent from Kiosk Ledger PWA_`;
                   </button>
                 </div>
                 {lastClosingCash > 0 && (
-                  <button
-                    type="button"
-                    onClick={() => setOpeningCash(String(lastClosingCash))}
-                    className="text-[9px] text-blue-600 font-bold hover:underline select-none text-left w-fit mt-1 flex items-center gap-1"
-                  >
-                    ⚡ Carry Forward Previous Cash: {formatINR(lastClosingCash)}
-                  </button>
+                  <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-2.5 flex items-center justify-between text-left mt-1 shadow-2xs">
+                    <div className="flex flex-col">
+                      <span className="text-[10px] font-black text-emerald-800 flex items-center gap-1">
+                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" /> Default Opening Cash Carried Forward
+                      </span>
+                      <span className="text-[9px] text-emerald-600 font-medium">
+                        Auto-loaded from previous closed ledger: {formatINR(lastClosingCash)}
+                      </span>
+                    </div>
+                    {openingCash !== String(lastClosingCash) && (
+                      <button
+                        type="button"
+                        onClick={() => setOpeningCash(String(lastClosingCash))}
+                        className="text-[9px] bg-emerald-600 text-white font-bold px-2 py-1 rounded-lg hover:bg-emerald-700 active:scale-95 transition-all shadow-xs"
+                      >
+                        Reset to {formatINR(lastClosingCash)}
+                      </button>
+                    )}
+                  </div>
                 )}
               </div>
               <button
@@ -1032,6 +1177,181 @@ _Sent from Kiosk Ledger PWA_`;
             className="w-full h-10 bg-rose-50 border border-rose-200 text-rose-700 hover:bg-rose-100 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 active:scale-95 transition-all shadow-xs"
           >
             <RefreshCw className="w-4 h-4 text-rose-600" /> Reset Security PIN Passcode
+          </button>
+
+          {/* Wipe All Data & Start Fresh */}
+          <button
+            onClick={() => {
+              if (window.confirm('⚠️ WARNING: Are you sure you want to WIPE ALL DATA and start fresh from now on? This will reset all bank accounts, transactions, day ledger history, and calculation sheets back to zero.')) {
+                if (window.confirm('FINAL CONFIRMATION: This action is permanent and cannot be undone. Wipe everything and start clean?')) {
+                  if (onClearAllData) onClearAllData();
+                  setActionSuccess('All data cleared successfully! System has started fresh with a clean slate.');
+                }
+              }
+            }}
+            className="w-full h-10 bg-red-50 border border-red-200 text-red-700 hover:bg-red-100 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 active:scale-95 transition-all shadow-xs"
+          >
+            <Trash2 className="w-4 h-4 text-red-600" /> Wipe All Data & Start Fresh
+          </button>
+        </div>
+      </div>
+
+      {/* System Action & Activity History (Date-Wise Audit Log) */}
+      <div className="bg-white border border-slate-200 rounded-2xl p-4 flex flex-col gap-3 shadow-sm text-left">
+        <div className="flex justify-between items-center">
+          <div className="flex items-center gap-2">
+            <div className="p-1.5 bg-blue-50 text-blue-600 rounded-lg">
+              <History className="w-4 h-4" />
+            </div>
+            <div>
+              <h3 className="text-xs font-bold uppercase tracking-wider text-slate-700">
+                System Action & Activity History
+              </h3>
+              <p className="text-[10px] text-slate-400">Date-wise audit trail of all actions performed in app</p>
+            </div>
+          </div>
+          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-200">
+            {systemActivityLog?.length || 0} Events
+          </span>
+        </div>
+
+        {/* Category Filter Pills */}
+        <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-none text-[10px] font-semibold">
+          {['ALL', 'SESSION', 'LEDGER', 'ACCOUNTS', 'TRANSACTIONS', 'SECURITY', 'DATA'].map((cat) => (
+            <button
+              key={cat}
+              onClick={() => setActivityCategory(cat)}
+              className={`px-2.5 py-1 rounded-lg transition-all shrink-0 uppercase tracking-wider ${
+                activityCategory === cat
+                  ? 'bg-blue-600 text-white shadow-xs'
+                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+              }`}
+            >
+              {cat}
+            </button>
+          ))}
+        </div>
+
+        {/* Filter Controls: Date Filter & Search */}
+        <div className="flex items-center gap-2">
+          <div className="relative flex-1">
+            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+            <input
+              type="text"
+              placeholder="Search actions or details..."
+              value={activitySearch}
+              onChange={(e) => setActivitySearch(e.target.value)}
+              className="w-full pl-8 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
+            />
+          </div>
+
+          <div className="relative shrink-0">
+            <input
+              type="date"
+              value={activityDateFilter}
+              onChange={(e) => setActivityDateFilter(e.target.value)}
+              className="px-2 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 text-slate-600 font-medium"
+            />
+          </div>
+
+          {activityDateFilter && (
+            <button
+              onClick={() => setActivityDateFilter('')}
+              className="px-2 py-1 text-[10px] font-bold text-slate-500 hover:text-slate-800 bg-slate-100 rounded-lg shrink-0"
+              title="Clear date filter"
+            >
+              Reset
+            </button>
+          )}
+        </div>
+
+        {/* Activity Timeline List Grouped Date-Wise */}
+        {groupedActivities.length === 0 ? (
+          <div className="p-6 text-center bg-slate-50 rounded-xl border border-dashed border-slate-200 flex flex-col items-center gap-2">
+            <Activity className="w-6 h-6 text-slate-300" />
+            <span className="text-xs font-medium text-slate-400">No activity logs recorded matching current filters</span>
+          </div>
+        ) : (
+          <div className="flex flex-col gap-3 max-h-[360px] overflow-y-auto pr-1">
+            {(showFullActivity ? groupedActivities : groupedActivities.slice(0, 3)).map(group => (
+              <div key={group.date} className="flex flex-col gap-1.5">
+                <div className="flex items-center justify-between sticky top-0 bg-white py-1 z-10 border-b border-slate-100">
+                  <span className="text-[11px] font-bold text-slate-700 flex items-center gap-1.5">
+                    <Calendar className="w-3.5 h-3.5 text-blue-600" />
+                    {group.date === new Date().toISOString().split('T')[0] ? 'Today' : group.date}
+                  </span>
+                  <span className="text-[9px] font-semibold text-slate-400">
+                    {group.items.length} {group.items.length === 1 ? 'action' : 'actions'}
+                  </span>
+                </div>
+
+                <div className="flex flex-col gap-1.5 pl-2 border-l-2 border-slate-200 ml-1.5">
+                  {(showFullActivity ? group.items : group.items.slice(0, 5)).map((item, idx) => (
+                    <div
+                      key={item.id || idx}
+                      className="bg-slate-50/80 hover:bg-slate-100/80 border border-slate-100 rounded-lg p-2 flex flex-col gap-1 transition-colors"
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-[11px] font-bold text-slate-800 truncate">
+                          {item.action}
+                        </span>
+                        <div className="flex items-center gap-1 shrink-0">
+                          <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded border uppercase tracking-wider ${getCategoryBadgeClass(item.category)}`}>
+                            {item.category}
+                          </span>
+                          <span className="text-[9px] font-mono text-slate-400 flex items-center gap-0.5">
+                            <Clock className="w-2.5 h-2.5" />
+                            {item.timeStr || ''}
+                          </span>
+                        </div>
+                      </div>
+                      {item.details && (
+                        <p className="text-[10px] text-slate-600 leading-snug break-words">
+                          {item.details}
+                        </p>
+                      )}
+                    </div>
+                  ))}
+                  {!showFullActivity && group.items.length > 5 && (
+                    <span className="text-[9px] text-slate-400 italic pl-1">
+                      + {group.items.length - 5} more actions on this date
+                    </span>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* View Toggle */}
+        {groupedActivities.length > 0 && (
+          <button
+            onClick={() => setShowFullActivity(!showFullActivity)}
+            className="text-[11px] font-semibold text-blue-600 hover:text-blue-700 py-1 text-center transition-colors"
+          >
+            {showFullActivity ? 'Show Recent Activities Only' : 'Show All Historical Dates & Actions'}
+          </button>
+        )}
+
+        {/* Footer Actions */}
+        <div className="flex gap-2 pt-1 border-t border-slate-100">
+          <button
+            onClick={handleExportActivityLog}
+            className="flex-1 h-9 bg-slate-50 border border-slate-200 text-slate-700 hover:bg-slate-100 rounded-xl text-[11px] font-semibold flex items-center justify-center gap-1.5 transition-all shadow-xs"
+          >
+            <Download className="w-3.5 h-3.5 text-blue-600" /> Export Log (.txt)
+          </button>
+
+          <button
+            onClick={() => {
+              if (window.confirm('Are you sure you want to clear the system activity history?')) {
+                if (onClearActivityLog) onClearActivityLog();
+                setActionSuccess('Activity history log cleared.');
+              }
+            }}
+            className="h-9 px-3 bg-rose-50 border border-rose-200 text-rose-700 hover:bg-rose-100 rounded-xl text-[11px] font-semibold flex items-center justify-center gap-1.5 transition-all shadow-xs"
+          >
+            <Trash2 className="w-3.5 h-3.5 text-rose-600" /> Clear
           </button>
         </div>
       </div>

@@ -17,6 +17,13 @@ export default function App() {
   const [transactions, setTransactions] = useState([]);
   const [dayHistory, setDayHistory] = useState([]);
   const [accountHistory, setAccountHistory] = useState([]);
+  const [systemActivityLog, setSystemActivityLog] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem('kiosk_system_activity_log') || '[]');
+    } catch (e) {
+      return [];
+    }
+  });
 
   const triggerNotification = (title, body) => {
     if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
@@ -71,6 +78,30 @@ export default function App() {
     };
   }, [loginSecurityEnabled]);
 
+  // Comprehensive System Activity & Action Logger
+  const logSystemActivity = (action, category, details, meta = {}) => {
+    try {
+      const list = JSON.parse(localStorage.getItem('kiosk_system_activity_log') || '[]');
+      const now = new Date();
+      const record = {
+        id: 'act_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
+        timestamp: now.toISOString(),
+        dateStr: now.toLocaleDateString('en-CA'),
+        timeStr: now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+        action,
+        category, // 'SESSION' | 'LEDGER' | 'ACCOUNTS' | 'TRANSACTIONS' | 'SECURITY' | 'DATA'
+        details,
+        meta
+      };
+      list.unshift(record);
+      const trimmed = list.slice(0, 1000);
+      localStorage.setItem('kiosk_system_activity_log', JSON.stringify(trimmed));
+      setSystemActivityLog(trimmed);
+    } catch (e) {
+      console.warn('Failed to log system activity:', e);
+    }
+  };
+
   // 2. Local Storage Sync Fallback Logic
   const logAccountChange = (entry) => {
     try {
@@ -95,19 +126,98 @@ export default function App() {
     const txs = JSON.parse(localStorage.getItem('kiosk_transactions') || '[]');
     const history = JSON.parse(localStorage.getItem('kiosk_day_history') || '[]');
     const accHist = JSON.parse(localStorage.getItem('kiosk_account_history') || '[]');
+    const actLog = JSON.parse(localStorage.getItem('kiosk_system_activity_log') || '[]');
     setActiveDay(day);
     setAccounts(accs);
     setTransactions(txs);
     setDayHistory(history);
     setAccountHistory(accHist);
+    setSystemActivityLog(actLog);
   };
 
   const loadData = () => {
     loadDataLocal();
   };
 
+  // Clear all data to start completely fresh
+  const handleClearAllData = () => {
+    localStorage.removeItem('kiosk_accounts');
+    localStorage.removeItem('kiosk_transactions');
+    localStorage.removeItem('kiosk_day_history');
+    localStorage.removeItem('kiosk_active_day');
+    localStorage.removeItem('kiosk_account_history');
+    localStorage.removeItem('kiosk_simple_udhar');
+
+    setAccounts([]);
+    setTransactions([]);
+    setDayHistory([]);
+    setAccountHistory([]);
+    setActiveDay(null);
+
+    logSystemActivity(
+      'All App Data Wiped',
+      'DATA',
+      'User wiped all accounts, transactions, day ledger history, and Udhar balances to start completely fresh.'
+    );
+
+    triggerNotification('All Data Wiped Clean', 'All accounts and records cleared. Fresh slate started!');
+    return { success: true };
+  };
+
+  const handleClearActivityLog = () => {
+    localStorage.removeItem('kiosk_system_activity_log');
+    const now = new Date();
+    const initEntry = {
+      id: 'act_init_' + Date.now(),
+      timestamp: now.toISOString(),
+      dateStr: now.toLocaleDateString('en-CA'),
+      timeStr: now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+      action: 'Activity Log Cleared',
+      category: 'DATA',
+      details: 'Action audit trail was cleared by user.',
+      meta: {}
+    };
+    localStorage.setItem('kiosk_system_activity_log', JSON.stringify([initEntry]));
+    setSystemActivityLog([initEntry]);
+    return { success: true };
+  };
+
   useEffect(() => {
+    // One-time deletion of all default/mock saved data to start completely fresh
+    const freshStartKey = 'kiosk_fresh_slate_reset_v4';
+    if (!localStorage.getItem(freshStartKey)) {
+      localStorage.removeItem('kiosk_accounts');
+      localStorage.removeItem('kiosk_transactions');
+      localStorage.removeItem('kiosk_day_history');
+      localStorage.removeItem('kiosk_active_day');
+      localStorage.removeItem('kiosk_account_history');
+      localStorage.removeItem('kiosk_simple_udhar');
+      localStorage.setItem(freshStartKey, 'true');
+
+      const now = new Date();
+      const resetEntry = {
+        id: 'act_fresh_' + Date.now(),
+        timestamp: now.toISOString(),
+        dateStr: now.toLocaleDateString('en-CA'),
+        timeStr: now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+        action: 'System Fresh Start',
+        category: 'DATA',
+        details: 'All default and existing stored data was cleared per user request. Fresh accounting slate initialized.',
+        meta: {}
+      };
+      localStorage.setItem('kiosk_system_activity_log', JSON.stringify([resetEntry]));
+    }
+
     loadData();
+
+    // Record application open session action
+    const currentMode = localStorage.getItem('kiosk_app_mode') || 'simple';
+    logSystemActivity(
+      'App Session Opened',
+      'SESSION',
+      `Application opened in ${currentMode === 'simple' ? 'Simple Mode' : 'Detailed Mode'} (Session Date: ${new Date().toLocaleDateString('en-IN')})`,
+      { mode: currentMode }
+    );
   }, []);
 
   // --- Offline Mode Local Storage Implementations ---
@@ -138,6 +248,12 @@ export default function App() {
       note: `Registered account "${bName}" with balance ₹${initBal.toLocaleString('en-IN')}`
     });
 
+    logSystemActivity(
+      'Account Added',
+      'ACCOUNTS',
+      `Registered bank account "${bName}" with starting balance ₹${initBal.toLocaleString('en-IN')}`
+    );
+
     loadDataLocal();
     return { success: true };
   };
@@ -165,16 +281,20 @@ export default function App() {
 
     localStorage.setItem('kiosk_accounts', JSON.stringify(accs));
 
+    const note = oldName !== newName 
+      ? `Renamed from "${oldName}" to "${newName}", balance set to ₹${newBalance.toLocaleString('en-IN')}`
+      : `Updated balance of "${newName}" from ₹${oldBalance.toLocaleString('en-IN')} to ₹${newBalance.toLocaleString('en-IN')}`;
+
     logAccountChange({
       type: 'ACCOUNT_EDITED',
       bankName: newName,
       oldName: oldName !== newName ? oldName : undefined,
       oldBalance,
       newBalance,
-      note: oldName !== newName 
-        ? `Renamed from "${oldName}" to "${newName}", balance set to ₹${newBalance.toLocaleString('en-IN')}`
-        : `Updated balance of "${newName}" from ₹${oldBalance.toLocaleString('en-IN')} to ₹${newBalance.toLocaleString('en-IN')}`
+      note
     });
+
+    logSystemActivity('Account Edited', 'ACCOUNTS', note);
 
     loadDataLocal();
     return { success: true };
@@ -198,6 +318,12 @@ export default function App() {
       newBalance: 0,
       note: `Deleted account "${targetName}" (had remaining balance ₹${targetBal.toLocaleString('en-IN')})`
     });
+
+    logSystemActivity(
+      'Account Deleted',
+      'ACCOUNTS',
+      `Deleted account "${targetName}" (had closing balance ₹${targetBal.toLocaleString('en-IN')})`
+    );
 
     loadDataLocal();
     return { success: true };
@@ -266,13 +392,21 @@ export default function App() {
     localStorage.setItem('kiosk_active_day', JSON.stringify(day));
     localStorage.setItem('kiosk_transactions', JSON.stringify(txs));
 
+    const txDesc = `${targetType === 'Credit' ? 'Withdrawal' : 'Deposit'}: ₹${Math.abs(txData.customerAmount).toLocaleString('en-IN')}${txData.customerName ? ` (${txData.customerName})` : ''}`;
+
     logAccountChange({
       type: targetType === 'Credit' ? 'TX_WITHDRAWAL' : 'TX_DEPOSIT',
       bankName: accs[idx].bankName,
       oldBalance: bankBalBefore,
       newBalance: accs[idx].currentBalance,
-      note: `${targetType === 'Credit' ? 'Withdrawal' : 'Deposit'}: ₹${Math.abs(txData.customerAmount).toLocaleString('en-IN')}${txData.customerName ? ` (${txData.customerName})` : ''}`
+      note: txDesc
     });
+
+    logSystemActivity(
+      targetType === 'Credit' ? 'Withdrawal Recorded' : 'Deposit Recorded',
+      'TRANSACTIONS',
+      `${targetType === 'Credit' ? 'Cash Out (Withdrawal)' : 'Cash In (Deposit)'}: ₹${Math.abs(txData.customerAmount).toLocaleString('en-IN')} via ${accs[idx].bankName}${txData.customerName ? ` for ${txData.customerName}` : ''}`
+    );
 
     loadDataLocal();
     return { success: true };
@@ -298,6 +432,7 @@ export default function App() {
       }
     });
     localStorage.setItem('kiosk_accounts', JSON.stringify(accs));
+    logSystemActivity('Balances Updated', 'ACCOUNTS', `Bulk updated balances for ${payload.length} account(s)`);
     loadDataLocal();
     return { success: true };
   };
@@ -357,6 +492,13 @@ export default function App() {
     day.closingBankBalances = bankBals;
     day.bankBalances = bankBals;
     localStorage.setItem('kiosk_active_day', JSON.stringify(day));
+
+    logSystemActivity(
+      'Drawer Cash Adjusted',
+      'LEDGER',
+      `Physical drawer cash adjusted to ₹${Number(closingCash).toLocaleString('en-IN')}`
+    );
+
     loadDataLocal();
     return { success: true, day };
   };
@@ -393,33 +535,66 @@ export default function App() {
     if (idx !== -1) {
       txs[idx].customerName = customerName;
       localStorage.setItem('kiosk_transactions', JSON.stringify(txs));
+      logSystemActivity(
+        'Customer Name Updated',
+        'TRANSACTIONS',
+        `Updated customer name to "${customerName}" for transaction ${id.substr(0, 10)}`
+      );
     }
     loadDataLocal();
     return { success: true };
   };
 
   const handleOpenDay = async (date, openingCash, cashDenominations) => {
-    const defaultDenoms = cashDenominations || { n500: 0, n200: 0, n100: 0, n50: 0, n20: 0, n10: 0, coins: 0 };
     const active = JSON.parse(localStorage.getItem('kiosk_active_day') || 'null');
     if (active && active.status === 'Open') return { success: false, error: 'Day already open' };
-    
+
+    const history = JSON.parse(localStorage.getItem('kiosk_day_history') || '[]');
+    const lastClosed = history.find(h => h.status === 'Closed' || h.closingCash !== undefined);
+
+    let finalOpeningCash;
+    if (openingCash !== undefined && openingCash !== null && openingCash !== '') {
+      finalOpeningCash = Number(openingCash);
+    } else if (lastClosed && lastClosed.closingCash !== undefined) {
+      finalOpeningCash = Number(lastClosed.closingCash);
+    } else {
+      finalOpeningCash = 0;
+    }
+    if (isNaN(finalOpeningCash)) finalOpeningCash = 0;
+
+    let defaultDenoms = cashDenominations;
+    if (!defaultDenoms && lastClosed?.cashDenominations) {
+      defaultDenoms = { ...lastClosed.cashDenominations };
+    }
+    if (!defaultDenoms) {
+      defaultDenoms = { n500: 0, n200: 0, n100: 0, n50: 0, n20: 0, n10: 0, coins: 0 };
+    }
+
     const bankBals = buildBankBalancesSnapshot();
+    if (lastClosed?.closingBankBalances) {
+      Object.entries(lastClosed.closingBankBalances).forEach(([bName, bal]) => {
+        if (bankBals[bName] === undefined || bankBals[bName] === 0) {
+          bankBals[bName] = Number(bal) || 0;
+        }
+      });
+    }
+
     const nowIso = new Date().toISOString();
     const openEvent = {
       id: 'evt_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
       type: 'OPEN',
       timestamp: nowIso,
-      cash: Number(openingCash) || 0,
+      cash: finalOpeningCash,
       cashDenominations: defaultDenoms,
       bankBalances: bankBals,
-      note: 'Ledger Opened'
+      note: lastClosed ? `Ledger Opened (Default carried forward from ${lastClosed.date})` : 'Ledger Opened'
     };
 
     const day = {
       date,
       openedAt: nowIso,
-      openingCash: Number(openingCash) || 0,
-      closingCash: Number(openingCash) || 0,
+      openingCash: finalOpeningCash,
+      closingCash: finalOpeningCash,
       openingDenominations: defaultDenoms,
       openingBankBalances: bankBals,
       closingBankBalances: bankBals,
@@ -432,8 +607,15 @@ export default function App() {
       closeCount: 0
     };
     localStorage.setItem('kiosk_active_day', JSON.stringify(day));
+
+    logSystemActivity(
+      'Day Ledger Opened',
+      'LEDGER',
+      `Opened business day ledger for ${date} with starting cash ₹${finalOpeningCash.toLocaleString('en-IN')}`
+    );
+
     loadDataLocal();
-    triggerNotification('Ledger Open', `Ledger opened for ${date} with ₹${Number(openingCash).toLocaleString('en-IN')} cash.`);
+    triggerNotification('Ledger Open', `Ledger opened for ${date} with ₹${finalOpeningCash.toLocaleString('en-IN')} cash.`);
     return { success: true };
   };
 
@@ -491,6 +673,13 @@ export default function App() {
     localStorage.setItem('kiosk_day_history', JSON.stringify(filtered));
 
     localStorage.setItem('kiosk_active_day', 'null');
+
+    logSystemActivity(
+      'Day Ledger Closed',
+      'LEDGER',
+      `Closed business day ledger for ${day.date}. Final drawer cash: ₹${finalCash.toLocaleString('en-IN')}, Day Profit: ₹${(Number(day.totalProfit) || 0).toLocaleString('en-IN')}`
+    );
+
     loadDataLocal();
     triggerNotification('Ledger Closed', `Ledger closed for ${day.date}. EOD report recorded.`);
     return { success: true, closedDay: day };
@@ -527,6 +716,12 @@ export default function App() {
     localStorage.setItem('kiosk_day_history', JSON.stringify(history));
     localStorage.setItem('kiosk_active_day', JSON.stringify(day));
 
+    logSystemActivity(
+      'Day Ledger Reopened',
+      'LEDGER',
+      `Reopened ledger session for ${date}`
+    );
+
     loadDataLocal();
     triggerNotification('Ledger Reopened', `Ledger reopened for today.`);
     return { success: true };
@@ -537,6 +732,11 @@ export default function App() {
     setLoginSecurityEnabled(true);
     localStorage.setItem('kiosk_login_security_enabled', 'true');
     setIsLocked(true);
+    logSystemActivity(
+      'PIN Passcode Reset',
+      'SECURITY',
+      'Security PIN passcode was cleared and set to reconfigure'
+    );
   };
 
   const handleToggleLoginSecurity = (enabled) => {
@@ -546,6 +746,11 @@ export default function App() {
     if (!nextVal) {
       setIsLocked(false);
     }
+    logSystemActivity(
+      'Security Criteria Changed',
+      'SECURITY',
+      `App login security criteria is now ${nextVal ? 'ENABLED (PIN required)' : 'DISABLED (Direct Open)'}`
+    );
   };
 
   const handleEditAccount = async (id, updatedData) => {
@@ -560,6 +765,11 @@ export default function App() {
     setAppMode(mode);
     localStorage.setItem('kiosk_app_mode', mode);
     setActiveTab('home');
+    logSystemActivity(
+      'Operating Mode Changed',
+      'SESSION',
+      `Switched app operating mode to ${mode === 'simple' ? 'Simple Mode' : 'Detailed Mode'}`
+    );
     triggerNotification('App Mode Changed', `Switched to ${mode === 'simple' ? 'Simple Mode' : 'Detailed Mode'}`);
   };
 
@@ -590,6 +800,12 @@ export default function App() {
       });
       localStorage.setItem('kiosk_accounts', JSON.stringify(accs));
     }
+
+    logSystemActivity(
+      'Simple Mode EOD Recorded',
+      'LEDGER',
+      `Saved Simple Mode calculation for ${finalDayRecord.date}. Net Profit: ₹${Number(finalDayRecord.totalProfit || 0).toLocaleString('en-IN')}, Drawer Cash: ₹${Number(finalDayRecord.closingCash || 0).toLocaleString('en-IN')}`
+    );
 
     loadDataLocal();
     triggerNotification('Day Ledger Saved', `Recorded Simple EOD profit of ₹${Number(finalDayRecord.totalProfit || 0).toLocaleString('en-IN')}`);
@@ -683,6 +899,10 @@ export default function App() {
                 onToggleAppMode={handleToggleAppMode}
                 loginSecurityEnabled={loginSecurityEnabled}
                 onToggleLoginSecurity={handleToggleLoginSecurity}
+                systemActivityLog={systemActivityLog}
+                onClearActivityLog={handleClearActivityLog}
+                onClearAllData={handleClearAllData}
+                logSystemActivity={logSystemActivity}
                 onOpenDay={handleOpenDay}
                 onCloseDay={handleCloseDay}
                 onReopenDay={handleReopenDay}
@@ -741,6 +961,10 @@ export default function App() {
                 onToggleAppMode={handleToggleAppMode}
                 loginSecurityEnabled={loginSecurityEnabled}
                 onToggleLoginSecurity={handleToggleLoginSecurity}
+                systemActivityLog={systemActivityLog}
+                onClearActivityLog={handleClearActivityLog}
+                onClearAllData={handleClearAllData}
+                logSystemActivity={logSystemActivity}
                 onOpenDay={handleOpenDay}
                 onCloseDay={handleCloseDay}
                 onReopenDay={handleReopenDay}

@@ -18,7 +18,9 @@ import {
   Coins,
   ChevronDown,
   ChevronUp,
-  AlertCircle
+  AlertCircle,
+  Sparkles,
+  CheckCircle2
 } from 'lucide-react';
 import { numberToIndianWords } from '../utils/numberToWords';
 import CashStatementReceipt from './CashStatementReceipt';
@@ -45,45 +47,140 @@ export default function SimpleModeCalculator({
     return digits.replace(/^0+(?=\d)/, '');
   };
 
+  // Helper to find previous closed day relative to targetDate
+  const findPreviousClosedDay = (targetDate, historyList = dayHistory) => {
+    const list = Array.isArray(historyList) && historyList.length > 0
+      ? historyList
+      : JSON.parse(localStorage.getItem('kiosk_day_history') || '[]');
+    if (!list || list.length === 0) return null;
+    const sorted = [...list].sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+    if (targetDate) {
+      const prior = sorted.find(d => (d.status === 'Closed' || d.closingCash !== undefined) && d.date < targetDate);
+      if (prior) return prior;
+    }
+    return sorted.find(d => d.status === 'Closed' || d.closingCash !== undefined) || null;
+  };
+
+  const getBalancesForDate = (targetDate) => {
+    const historyList = Array.isArray(dayHistory) && dayHistory.length > 0
+      ? dayHistory
+      : JSON.parse(localStorage.getItem('kiosk_day_history') || '[]');
+
+    const accsList = Array.isArray(accounts) && accounts.length > 0
+      ? accounts
+      : JSON.parse(localStorage.getItem('kiosk_accounts') || '[]');
+
+    // Check if targetDate was already recorded/saved
+    const saved = historyList.find(d => d.date === targetDate);
+    if (saved) {
+      const openCash = saved.openingCash !== undefined ? String(saved.openingCash) : '';
+      const closeCash = saved.closingCash !== undefined ? String(saved.closingCash) : '';
+      const openBank = {};
+      const closeBank = {};
+      accsList.forEach(acc => {
+        const o = saved.openingBankBalances?.[acc.bankName] ?? acc.currentBalance;
+        const c = saved.closingBankBalances?.[acc.bankName] ?? acc.currentBalance;
+        openBank[acc.bankName] = o !== undefined && o !== null && Number(o) > 0 ? String(o) : (Number(o) === 0 ? '0' : '');
+        closeBank[acc.bankName] = c !== undefined && c !== null && Number(c) > 0 ? String(c) : (Number(c) === 0 ? '0' : '');
+      });
+      return {
+        isCarriedForward: false,
+        sourceDay: saved,
+        openingCash: openCash,
+        closingCash: closeCash,
+        openingBankBalances: openBank,
+        closingBankBalances: closeBank
+      };
+    }
+
+    // Default to the previous closed day's closing ledger & account balances
+    const prevClosed = findPreviousClosedDay(targetDate, historyList);
+    if (prevClosed) {
+      const prevCash = prevClosed.closingCash ?? prevClosed.closing_cash ?? 0;
+      const openCash = prevCash > 0 ? String(prevCash) : (prevCash === 0 ? '0' : '');
+      const openBank = {};
+      const closeBank = {};
+
+      accsList.forEach(acc => {
+        const prevBal = prevClosed.closingBankBalances?.[acc.bankName] ?? 
+                        prevClosed.bankBalances?.[acc.bankName] ?? 
+                        acc.currentBalance ?? 0;
+        const strVal = Number(prevBal) > 0 ? String(prevBal) : (Number(prevBal) === 0 ? '0' : '');
+        openBank[acc.bankName] = strVal;
+        closeBank[acc.bankName] = strVal; // Default closing to same as opening
+      });
+
+      return {
+        isCarriedForward: true,
+        sourceDay: prevClosed,
+        openingCash: openCash,
+        closingCash: '',
+        openingBankBalances: openBank,
+        closingBankBalances: closeBank
+      };
+    }
+
+    // Fallback if no prior history exists
+    const openBank = {};
+    const closeBank = {};
+    accsList.forEach(acc => {
+      const bal = Number(acc.currentBalance || 0);
+      const strVal = bal > 0 ? String(bal) : '';
+      openBank[acc.bankName] = strVal;
+      closeBank[acc.bankName] = strVal;
+    });
+
+    return {
+      isCarriedForward: false,
+      sourceDay: null,
+      openingCash: activeDay?.openingCash ? String(activeDay.openingCash) : '',
+      closingCash: activeDay?.closingCash ? String(activeDay.closingCash) : '',
+      openingBankBalances: openBank,
+      closingBankBalances: closeBank
+    };
+  };
+
   // 1. Core State
   const [date, setDate] = useState(todayStr);
 
-  // Opening amounts (empty string shows placeholder '0' and allows clean typing)
-  const [openingCash, setOpeningCash] = useState(() => {
-    const val = activeDay?.openingCash;
-    return val ? String(val) : '';
-  });
-  const [openingBankBalances, setOpeningBankBalances] = useState(() => {
-    const map = {};
-    accounts.forEach(acc => {
-      const bal = Number(acc.currentBalance || 0);
-      map[acc.bankName] = bal > 0 ? String(bal) : '';
-    });
-    return map;
+  const [openingCash, setOpeningCash] = useState(() => getBalancesForDate(todayStr).openingCash);
+  const [openingBankBalances, setOpeningBankBalances] = useState(() => getBalancesForDate(todayStr).openingBankBalances);
+  const [closingCash, setClosingCash] = useState(() => getBalancesForDate(todayStr).closingCash);
+  const [closingBankBalances, setClosingBankBalances] = useState(() => getBalancesForDate(todayStr).closingBankBalances);
+  const [carryForwardNotice, setCarryForwardNotice] = useState(() => {
+    const init = getBalancesForDate(todayStr);
+    return init.isCarriedForward && init.sourceDay
+      ? {
+          date: init.sourceDay.date,
+          cash: init.sourceDay.closingCash,
+          bankBalances: init.sourceDay.closingBankBalances
+        }
+      : null;
   });
 
-  // Closing / Current amounts
-  const [closingCash, setClosingCash] = useState(() => {
-    const val = activeDay?.closingCash;
-    return val ? String(val) : '';
-  });
-  const [closingBankBalances, setClosingBankBalances] = useState(() => {
-    const map = {};
-    accounts.forEach(acc => {
-      const bal = Number(acc.currentBalance || 0);
-      map[acc.bankName] = bal > 0 ? String(bal) : '';
-    });
-    return map;
-  });
+  const handleDateChange = (newDate) => {
+    setDate(newDate);
+    const data = getBalancesForDate(newDate);
+    setOpeningCash(data.openingCash);
+    setClosingCash(data.closingCash);
+    setOpeningBankBalances(data.openingBankBalances);
+    setClosingBankBalances(data.closingBankBalances);
+    if (data.isCarriedForward && data.sourceDay) {
+      setCarryForwardNotice({
+        date: data.sourceDay.date,
+        cash: data.sourceDay.closingCash,
+        bankBalances: data.sourceDay.closingBankBalances
+      });
+    } else {
+      setCarryForwardNotice(null);
+    }
+  };
 
   // Udhar & Jama Ledger list
   const [udharList, setUdharList] = useState(() => {
     try {
       const stored = localStorage.getItem('kiosk_simple_udhar');
-      return stored ? JSON.parse(stored) : [
-        { id: 'u1', name: 'Ramesh Patel', amount: 500, type: 'udhar', note: 'Pending cash withdrawal' },
-        { id: 'u2', name: 'Suresh Kumar', amount: 200, type: 'jama', note: 'Advance for bill' }
-      ];
+      return stored ? JSON.parse(stored) : [];
     } catch (e) {
       return [];
     }
@@ -437,10 +534,32 @@ export default function SimpleModeCalculator({
             <input
               type="date"
               value={date}
-              onChange={(e) => setDate(e.target.value)}
+              onChange={(e) => handleDateChange(e.target.value)}
               className="text-xs font-bold text-slate-900 bg-slate-50 border border-slate-300 rounded-xl px-2 py-1 focus:outline-none focus:border-emerald-600"
             />
           </div>
+
+          {/* Auto-Carried Forward Notification Banner */}
+          {carryForwardNotice && (
+            <div className="bg-gradient-to-r from-emerald-50 to-teal-50 border border-emerald-200 rounded-2xl p-3 flex items-center justify-between text-left shadow-2xs">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-xl bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-xs">
+                  <Sparkles className="w-4 h-4" />
+                </div>
+                <div className="flex flex-col">
+                  <span className="text-[10.5px] font-black uppercase tracking-wider text-emerald-950 flex items-center gap-1">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" /> Opening Balances Linked from Previous Day
+                  </span>
+                  <span className="text-[9.5px] text-emerald-800 font-semibold leading-tight">
+                    Opening Cash ({formatINR(carryForwardNotice.cash)}) & Bank accounts default to {carryForwardNotice.date} closing balances.
+                  </span>
+                </div>
+              </div>
+              <span className="text-[8px] font-black bg-emerald-200/80 text-emerald-900 px-2 py-0.5 rounded-full uppercase shrink-0">
+                Carried Forward
+              </span>
+            </div>
+          )}
 
           {/* SECTION A: Physical Drawer Cash */}
           <div className="bg-white border border-slate-200 rounded-3xl p-4 flex flex-col gap-3 shadow-xs">
@@ -467,7 +586,9 @@ export default function SimpleModeCalculator({
                   onChange={(e) => setOpeningCash(cleanNumber(e.target.value))}
                   className="h-11 px-3 bg-slate-50 border border-slate-200 focus:border-emerald-600 rounded-xl text-base font-black text-slate-900 focus:outline-none shadow-2xs"
                 />
-                <span className="text-[8px] text-slate-400">Cash in morning / start</span>
+                <span className="text-[8px] text-slate-400">
+                  {carryForwardNotice ? `Auto-carried from ${carryForwardNotice.date}` : 'Cash in morning / start'}
+                </span>
               </div>
 
               <div className="flex flex-col gap-1">
@@ -546,7 +667,9 @@ export default function SimpleModeCalculator({
 
                     <div className="grid grid-cols-2 gap-2 text-[10px]">
                       <div className="flex flex-col gap-0.5">
-                        <span className="text-[8px] font-bold text-slate-400 uppercase">Opening (Start)</span>
+                        <span className="text-[8px] font-bold text-slate-400 uppercase">
+                          Opening {carryForwardNotice ? '(Linked)' : '(Start)'}
+                        </span>
                         <input
                           type="text"
                           inputMode="numeric"
